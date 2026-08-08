@@ -1,0 +1,57 @@
+* { box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', Arial, sans-serif;
+  background: #1b1424;
+  color: #eee;
+  margin: 0;
+  padding: 16px;
+}
+h1, h2, h3 { color: #ffb84d; margin: 8px 0; }
+.hidden { display: none; }
+.screen { max-width: 1100px; margin: 0 auto; }
+input {
+  display: block; width: 100%; max-width: 340px;
+  padding: 10px; margin: 8px auto; border-radius: 6px; border: none;
+  font-size: 15px;
+}
+button {
+  background: #ff7a29; color: white; border: none; border-radius: 6px;
+  padding: 10px 16px; font-size: 14px; cursor: pointer; margin: 4px;
+}
+button:hover { background: #ff9a54; }
+button:disabled { background: #555; cursor: not-allowed; }
+.hint { color: #999; font-size: 13px; }
+
+#opponents { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.opp-card {
+  background: #2a2038; border-radius: 8px; padding: 10px; min-width: 160px;
+  border: 2px solid transparent;
+}
+.opp-card.active-turn { border-color: #ffb84d; }
+.opp-card .name { font-weight: bold; color: #ffcf8f; }
+.opp-card .stat { font-size: 13px; color: #ccc; }
+
+.market-block { margin-bottom: 14px; }
+.card-row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.card {
+  background: #33254a; border-radius: 8px; padding: 8px; width: 140px;
+  min-height: 150px; font-size: 12px; cursor: pointer;
+  border: 1px solid #4b3a68; display: flex; flex-direction: column; justify-content: space-between;
+}
+.card .cart-img { width: 100%; max-height: 90px; object-fit: cover; border-radius: 4px; margin-bottom: 4px; }
+.card:hover { border-color: #ff7a29; }
+.card .cname { font-weight: bold; color: #ffcf8f; margin-bottom: 4px; }
+.card .ctext { color: #ccc; font-size: 11px; flex-grow: 1; }
+.card .cfooter { display: flex; justify-content: space-between; margin-top: 6px; font-size: 12px; }
+.card .cost { color: #7fd1ff; }
+.card .power { color: #9dff8f; }
+
+#self-panel { margin-top: 16px; border-top: 1px solid #4b3a68; padding-top: 12px; }
+#self-stats { margin-bottom: 8px; font-size: 14px; }
+#self-stats b { color: #ffb84d; }
+
+#log-panel {
+  background: #14101c; border-radius: 8px; padding: 8px; height: 110px;
+  overflow-y: auto; font-size: 12px; color: #9c8fb3; margin-bottom: 12px;
+}

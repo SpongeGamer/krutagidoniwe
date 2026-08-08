@@ -1,0 +1,52 @@
+[
+  {
+    "colduna_name": "Бензору Магокрошитель",
+    "familiar_id": "fam_benz",
+    "notes": "Пример из правил стр.10"
+  },
+  {
+    "colduna_name": "Кимоняша, Идол отаку",
+    "familiar_id": "fam_weaboo",
+    "notes": null
+  },
+  {
+    "colduna_name": "Грибуль Дюк, Доктор споровых наук",
+    "familiar_id": "fam_notarius",
+    "notes": null
+  },
+  {
+    "colduna_name": "Бедовая принцесса, Сильная и независимая",
+    "familiar_id": "fam_suitors",
+    "notes": null
+  },
+  {
+    "colduna_name": "Яжмужик, Сын Яжотца",
+    "familiar_id": "fam_family",
+    "notes": null
+  },
+  {
+    "colduna_name": "Нетотдед! Бородатая сволочь",
+    "familiar_id": "fam_fatboy",
+    "notes": null
+  },
+  {
+    "colduna_name": "Паровоз Танатыч, Последняя электричка",
+    "familiar_id": "fam_conduct",
+    "notes": null
+  },
+  {
+    "colduna_name": "Баба Катя, Библиотекарша из Ада",
+    "familiar_id": "fam_mescalito",
+    "notes": null
+  },
+  {
+    "colduna_name": "Король Похотун, Гнилой стручок",
+    "familiar_id": "fam_jester",
+    "notes": null
+  },
+  {
+    "colduna_name": "Адское хрючево, Злак маньяк",
+    "familiar_id": "fam_hostages",
+    "notes": null
+  }
+]

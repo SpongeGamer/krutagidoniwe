@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Крутагидон Online</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="join-screen" class="screen">
+    <h1>Крутагидон</h1>
+    <input id="name-input" placeholder="Твоё имя колдуна" />
+    <input id="room-input" placeholder="Код комнаты (придумай и скажи друзьям)" />
+    <button id="join-btn">Войти</button>
+  </div>
+
+  <div id="lobby-screen" class="screen hidden">
+    <h2>Лобби комнаты <span id="lobby-room-code"></span></h2>
+    <ul id="lobby-players"></ul>
+    <button id="start-btn">Начать игру</button>
+    <p class="hint">Начать может любой, как только все зашли.</p>
+  </div>
+
+  <div id="game-screen" class="screen hidden">
+    <div id="log-panel"></div>
+
+    <div id="opponents"></div>
+
+    <div id="markets">
+      <div class="market-block">
+        <h3>Барахолка (осн. колода: <span id="main-deck-count"></span>)</h3>
+        <div id="market" class="card-row"></div>
+      </div>
+      <div class="market-block">
+        <h3>Барахолка легенд (колода легенд: <span id="legend-deck-count"></span>)</h3>
+        <div id="legend-market" class="card-row"></div>
+      </div>
+      <div class="market-block">
+        <button id="buy-wild-btn">Купить Шальную магию (3 мощи, осталось <span id="wild-count"></span>)</button>
+        <button id="buy-familiar-btn">Купить фамильяра (6 мощи)</button>
+      </div>
+    </div>
+
+    <div id="self-panel">
+      <div id="self-stats"></div>
+      <div id="hand" class="card-row"></div>
+      <button id="end-turn-btn">Закончить ход</button>
+    </div>
+  </div>
+
+<script src="app.js"></script>
+</body>
+</html>
