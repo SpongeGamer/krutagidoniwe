@@ -1,148 +1,26 @@
-let ws = null;
-let myId = null;
-let myName = null;
-let roomId = null;
-let lastState = null;
-
-const $ = (id) => document.getElementById(id);
-
-function wsUrl(room) {
-  const proto = location.protocol === "https:" ? "wss" : "ws";
-  return `${proto}://${location.host}/ws/${encodeURIComponent(room)}`;
-}
-
-$("join-btn").onclick = () => {
-  myName = $("name-input").value.trim() || "Колдун";
-  roomId = $("room-input").value.trim() || "default";
-  const saved = localStorage.getItem("krutagidon_pid_" + roomId);
-
-  ws = new WebSocket(wsUrl(roomId));
-  ws.onopen = () => {
-    ws.send(JSON.stringify({ name: myName, player_id: saved || undefined }));
-  };
-  ws.onmessage = (ev) => {
-    const msg = JSON.parse(ev.data);
-    handleMessage(msg);
-  };
-  ws.onclose = () => console.log("Соединение закрыто");
-};
-
-function handleMessage(msg) {
-  if (msg.type === "joined") {
-    myId = msg.player_id;
-    localStorage.setItem("krutagidon_pid_" + roomId, myId);
-    show("lobby-screen");
-    $("lobby-room-code").textContent = roomId;
-  } else if (msg.type === "lobby") {
-    $("lobby-players").innerHTML = msg.players.map(n => `<li>${escapeHtml(n)}</li>`).join("");
-    if (msg.started) show("game-screen");
-  } else if (msg.type === "state") {
-    lastState = msg.state;
-    show("game-screen");
-    render(msg.state);
-  } else if (msg.type === "error") {
-    alert(msg.message);
-  }
-}
-
-function show(id) {
-  ["join-screen", "lobby-screen", "game-screen"].forEach(s => $(s).classList.toggle("hidden", s !== id));
-}
-
-$("start-btn").onclick = () => ws.send(JSON.stringify({ action: "start_game" }));
-$("end-turn-btn").onclick = () => ws.send(JSON.stringify({ action: "end_turn" }));
-$("buy-wild-btn").onclick = () => ws.send(JSON.stringify({ action: "buy_wild_magic" }));
-$("buy-familiar-btn").onclick = () => ws.send(JSON.stringify({ action: "buy_familiar" }));
-
-function escapeHtml(s) {
-  return (s || "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-}
-
-function cardEl(c, onClick) {
-  const div = document.createElement("div");
-  div.className = "card";
-  div.title = c.text || "";
-  div.innerHTML = `
-    <img class="cart-img" src="cards/${encodeURIComponent(c.id)}.jpg"
-         onerror="this.style.display='none'" />
-    <div class="cname">${escapeHtml(c.name)}</div>
-    <div class="ctext">${escapeHtml((c.text || "").slice(0, 90))}</div>
-    <div class="cfooter">
-      <span class="cost">💰${c.cost}</span>
-      <span class="power">+${c.power}</span>
-    </div>`;
-  if (onClick) div.onclick = onClick;
-  return div;
-}
-
-function render(state) {
-  const me = state.players.find(p => p.id === myId);
-  const isMyTurn = state.turn_player_id === myId;
-
-  // лог
-  $("log-panel").innerHTML = state.logs.map(l => `<div>${escapeHtml(l)}</div>`).join("");
-  $("log-panel").scrollTop = $("log-panel").scrollHeight;
-
-  // оппоненты (и я сам сверху, компактно)
-  $("opponents").innerHTML = "";
-  state.players.forEach(p => {
-    const div = document.createElement("div");
-    div.className = "opp-card" + (p.id === state.turn_player_id ? " active-turn" : "");
-    div.innerHTML = `
-      <div class="name">${escapeHtml(p.name)}${p.id === myId ? " (я)" : ""} ${p.controls_prize ? "👑" : ""} ${p.is_loshara ? "🤡" : ""}</div>
-      <div class="stat">❤️ ${p.life}/${p.max_life}</div>
-      <div class="stat">🧀 чипсины: ${p.chipsines}</div>
-      <div class="stat">🎴 рука: ${p.hand_count}, колода: ${p.deck_count}, сброс: ${p.discard_count}</div>
-      <div class="stat">💀 ЖДК: ${p.death_tokens}</div>
-      <div class="stat">⚡ мощь: ${p.power_available}</div>
-    `;
-    $("opponents").appendChild(div);
-  });
-
-  // рынок
-  $("main-deck-count").textContent = state.main_deck_count;
-  $("legend-deck-count").textContent = state.legend_deck_count;
-  $("wild-count").textContent = state.wild_magic_remaining;
-  $("market").innerHTML = "";
-  state.market.forEach(c => {
-    $("market").appendChild(cardEl(c, () => isMyTurn && buyCard(c.id)));
-  });
-  $("legend-market").innerHTML = "";
-  state.legend_market.forEach(c => {
-    $("legend-market").appendChild(cardEl(c, () => isMyTurn && buyCard(c.id)));
-  });
-  $("buy-wild-btn").disabled = !isMyTurn;
-  $("buy-familiar-btn").disabled = !isMyTurn || !me || me.familiar_bought;
-
-  // моя рука
-  $("hand").innerHTML = "";
-  if (me && me.hand) {
-    me.hand.forEach(c => {
-      $("hand").appendChild(cardEl(c, () => isMyTurn && playCard(c)));
-    });
-  }
-  $("self-stats").innerHTML = me ? `
-    <b>${escapeHtml(me.name)}</b> — ❤️${me.life} | ⚡ мощь доступно: ${me.power_available} |
-    🧀 чипсины: ${me.chipsines} | ${isMyTurn ? "<b style='color:#ffb84d'>ТВОЙ ХОД</b>" : "ход соперника"}
-  ` : "";
-  $("end-turn-btn").disabled = !isMyTurn;
-
-  if (state.game_over) {
-    const winner = state.players.find(p => p.id === state.winner);
-    alert("Игра окончена! Победитель: " + (winner ? winner.name : "?"));
-  }
-}
-
-function buyCard(cardId) {
-  ws.send(JSON.stringify({ action: "buy_card", card_id: cardId }));
-}
-
-function playCard(card) {
-  let params = {};
-  if (card.text && card.text.toLowerCase().includes("выбранн")) {
-    const targets = lastState.players.filter(p => p.id !== myId).map(p => `${p.name} (${p.id})`).join(", ");
-    const targetId = prompt(`Карта требует цель. Введи id цели.\nВарианты: ${targets}\nСвой id: ${myId}`);
-    if (targetId) params.target_id = targetId.trim();
-  }
-  ws.send(JSON.stringify({ action: "play_card", card_id: card.id, params }));
-}
+let ws=null,myId=null,roomId=null,lastState=null,announcedGameOver=false,pendingTargetCard=null,pendingAttackChoice=null,deferredAttackMode=false,chosenAvatar='🐈‍⬛',wildTargetMode=false,lastTurnPlayer=null;
+const $=(id)=>document.getElementById(id);
+const SFX={click:'assets/audio/click.ogg',card:'assets/audio/card-play.ogg',drawer:'assets/audio/drawer.ogg',turn:'assets/audio/turn.ogg',error:'assets/audio/error.ogg'};const soundPool=Object.fromEntries(Object.entries(SFX).map(([name,url])=>{const audio=new Audio(url);audio.preload='auto';audio.volume=name==='turn'?.075:.055;return [name,audio]}));let soundOn=localStorage.getItem('krutagidon_sound')!=='off';function playSound(name){if(!soundOn)return;const base=soundPool[name];if(!base)return;const audio=base.cloneNode();audio.volume=base.volume;audio.play().catch(()=>{})}
+function wsUrl(room){return `${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws/${encodeURIComponent(room)}`}
+$("join-btn").onclick=()=>{const name=$("name-input").value.trim()||'Колдун';roomId=$("room-input").value.trim()||'default';const saved=localStorage.getItem('krutagidon_pid_'+roomId);$("join-btn").disabled=true;$("join-btn").textContent='Подключаемся…';ws=new WebSocket(wsUrl(roomId));ws.onopen=()=>ws.send(JSON.stringify({name,avatar:chosenAvatar,player_id:saved||undefined}));ws.onmessage=e=>handleMessage(JSON.parse(e.data));ws.onclose=()=>{$("join-btn").disabled=false;$("join-btn").textContent='Войти в Крутагидон'}};
+function handleMessage(msg){if(msg.type==='joined'){myId=msg.player_id;localStorage.setItem('krutagidon_pid_'+roomId,myId);$('lobby-room-code').textContent=roomId;$('room-code-game').textContent=roomId;show('lobby-screen')}else if(msg.type==='lobby'){renderLobby(msg);if(msg.started)show('game-screen')}else if(msg.type==='state'){lastState=msg.state;show('game-screen');render(msg.state)}else if(msg.type==='error'){playSound('error');alert(msg.message)}}
+function show(id){['join-screen','lobby-screen','game-screen'].forEach(s=>$(s).classList.toggle('hidden',s!==id))}
+function renderLobby(msg){$('lobby-players').innerHTML=msg.players.map(p=>`<li>${escapeHtml(p.name)}${p.id===msg.host_id?' · хост':''} <span class="${p.ready?'ready':''}">${p.ready?'✓ готов':'выбирает свойство / фамильяра'}</span></li>`).join('');const hasProperty=Boolean(msg.selected_property_id);$('familiar-picker').classList.toggle('hidden',!hasProperty);if(hasProperty){const selected=msg.selected_familiar_ids||[];$('familiar-choice-title').textContent=msg.familiar_required===3?`Выбери фамильяров: ${selected.length}/3`:`Выбери одного фамильяра: ${selected.length}/1`;$('familiar-options').replaceChildren(...msg.familiar_choices.map(board=>familiarButton(board,selected)))}$('property-options').replaceChildren(...msg.property_choices.map(p=>propertyButton(p,msg.selected_property_id)));$('start-btn').disabled=msg.players.some(p=>!p.ready);$('host-settings').classList.toggle('hidden',!msg.is_host);if(msg.is_host){$('zhdk-mode').value=msg.settings?.zhdk_mode||'standard';$('zhdk-custom').classList.toggle('hidden',$('zhdk-mode').value!=='custom');if(msg.settings?.zhdk_count)$('zhdk-custom').value=msg.settings.zhdk_count}}
+function familiarButton(board,selected){const btn=document.createElement('button');btn.className='familiar-option'+(selected.includes(board.id)?' selected':'');btn.innerHTML=`<b>${escapeHtml(board.wizard_name)}</b><span>Фамильяр: ${escapeHtml(board.familiar_name)}</span><small>${escapeHtml(board.familiar_text.slice(0,105))}</small>`;btn.onclick=()=>ws.send(JSON.stringify({action:'choose_familiar',familiar_id:board.id}));return btn}
+function propertyButton(property,selected){const btn=document.createElement('button');btn.className='property-option'+(selected===property.id?' selected':'');btn.innerHTML=`<b>${escapeHtml(property.name)}</b><small>${escapeHtml(property.effect_text)}</small>`;btn.onclick=()=>ws.send(JSON.stringify({action:'choose_property',property_id:property.id}));return btn}
+const AVATARS=[['🐈‍⬛','Чёрный кот'],['🐕','Верный пёс'],['🦊','Лиса-колдунья'],['🐸','Жабий маг'],['🐉','Маленький дракон'],['🦄','Единорог'],['🦇','Летучая мышь'],['🐺','Лунный волк'],['🦝','Енот-воришка'],['🐙','Осьминог из бездны'],['🦜','Попугай-предсказатель'],['🦎','Ящер-маг'],['🐌','Улитка хаоса'],['🦋','Ночная бабочка'],['👽','Космический колдун'],['🤡','Сальный шут'],['🧙','Старый колдун'],['🧙‍♀️','Ведьма'],['🧛','Вампир'],['🧟','Зомби'],['👹','Демон'],['🧞','Джинн'],['🧚','Фея'],['🧜','Русалка']];let avatarIndex=0;function renderAvatar(direction=1){const avatar=$('avatar-current');avatar.classList.add('swap');setTimeout(()=>{const [icon,name]=AVATARS[avatarIndex];chosenAvatar=icon;avatar.textContent=icon;$('avatar-name').textContent=name;avatar.classList.remove('swap')},120)}$('avatar-prev').onclick=()=>{avatarIndex=(avatarIndex-1+AVATARS.length)%AVATARS.length;renderAvatar(-1)};$('avatar-next').onclick=()=>{avatarIndex=(avatarIndex+1)%AVATARS.length;renderAvatar(1)};
+$('zhdk-mode').onchange=()=>$('zhdk-custom').classList.toggle('hidden',$('zhdk-mode').value!=='custom');$('save-room-settings').onclick=()=>{ws.send(JSON.stringify({action:'configure_room',zhdk_mode:$('zhdk-mode').value,zhdk_count:$('zhdk-custom').value}));playSound('click')};$('sound-toggle').textContent=soundOn?'🔊':'🔇';$('sound-toggle').onclick=()=>{soundOn=!soundOn;localStorage.setItem('krutagidon_sound',soundOn?'on':'off');$('sound-toggle').textContent=soundOn?'🔊':'🔇';if(soundOn)playSound('click')};$('start-btn').onclick=()=>{playSound('click');ws.send(JSON.stringify({action:'start_game'}));};$('end-turn-btn').onclick=()=>ws.send(JSON.stringify({action:'end_turn'}));$('buy-wild-btn').onclick=()=>ws.send(JSON.stringify({action:'buy_wild_magic'}));$('buy-familiar-btn').onclick=()=>ws.send(JSON.stringify({action:'buy_familiar'}));$('target-cancel').onclick=closeTargetModal;$('attack-cancel').onclick=()=>$('attack-modal').classList.add('hidden');$('attack-later').onclick=()=>{sendPlay(pendingAttackChoice,{defer_attack:true});$('attack-modal').classList.add('hidden')};$('attack-now').onclick=()=>{const card=pendingAttackChoice;$('attack-modal').classList.add('hidden');playAttackNow(card)};$('wild-cancel').onclick=()=>$('wild-modal').classList.add('hidden');$('wild-power').onclick=()=>{sendPlay({id:'spec_wild'}, {choice:'power'});$('wild-modal').classList.add('hidden')};$('wild-steal').onclick=()=>{wildTargetMode=true;$('wild-modal').classList.add('hidden');openTargetModal({id:'spec_wild',name:'Шальная магия'})};$('log-toggle').onclick=()=>document.querySelector('.event-feed').classList.add('open');$('log-close').onclick=()=>document.querySelector('.event-feed').classList.remove('open');document.querySelectorAll('.drawer-tab').forEach(tab=>tab.onclick=()=>{playSound('drawer');tab.closest('.market-drawer').classList.toggle('open')});document.addEventListener('contextmenu',event=>event.preventDefault(),true);document.addEventListener('dragstart',event=>event.preventDefault(),true);
+function escapeHtml(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function cardEl(card,onClick){const el=document.createElement('article');el.className='card';el.title=`${card.name}\n${card.text||''}`;const img=document.createElement('img');img.className='cart-img';img.alt=card.name;img.loading='lazy';img.src=`assets/cards/${encodeURIComponent(card.id)}.webp`;img.onerror=()=>{img.remove();el.classList.remove('has-image')};img.onload=()=>el.classList.add('has-image');const info=document.createElement('div');info.className='card-info';info.innerHTML=`<div class="cname">${escapeHtml(card.name)}</div><div class="ctext">${escapeHtml((card.text||'').slice(0,128))}</div><div class="cfooter"><span class="cost">◉ ${card.cost}</span><span class="power">⚡ +${card.power}</span></div>`;el.append(img,info);if(onClick)el.onclick=onClick;return el}
+function playerEl(p,isMe,isTurn){const el=document.createElement('article');el.className='opp-card'+(isTurn?' active-turn':'');el.innerHTML=`${isTurn?'<div class="turn-arrow">▼</div>':''}<div class="name"><span class="avatar">${escapeHtml(p.avatar||'🧙')}</span>${escapeHtml(p.name)}${isMe?' · ты':''} ${p.controls_prize?'♛':''} ${p.is_loshara?'☠':''}</div><div class="stat stat-power">⚡ ${p.power_available}</div><div class="stat">♥ ${p.life}/${p.max_life}</div><div class="stat">● ${p.chipsines}</div><div class="stat">✦ ${p.hand_count}</div><div class="stat">▣ ${p.deck_count}</div><div class="stat">↻ ${p.discard_count}</div><div class="stat">☠ ${p.death_tokens}</div>${p.familiar?`<div class="familiar-mini">✦ ${escapeHtml(p.familiar.name)}</div>`:''}`;return el}
+function render(state){const me=state.players.find(p=>p.id===myId),active=state.players.find(p=>p.id===state.turn_player_id),myTurn=state.turn_player_id===myId;if(lastTurnPlayer&&lastTurnPlayer!==state.turn_player_id)playSound('turn');lastTurnPlayer=state.turn_player_id;renderDecision(state.pending_decision);$('turn-banner').textContent=active?(myTurn?'Твой ход — наводи Крутагидон':`Ходит ${active.name}`):'Подготовка';$('log-panel').innerHTML=state.logs.map(l=>`<div>${escapeHtml(l)}</div>`).join('');$('log-panel').scrollTop=$('log-panel').scrollHeight;$('opponents').replaceChildren(...state.players.map(p=>playerEl(p,p.id===myId,p.id===state.turn_player_id)));$('played-cards').replaceChildren(...(active?.played_this_turn||[]).map(c=>cardEl(c,null)));$('main-deck-count').textContent=state.main_deck_count;$('legend-deck-count').textContent=state.legend_deck_count;$('wild-count').textContent=state.wild_magic_remaining;$('vyal-count').textContent=state.vyal_remaining;$('zhdk-count').textContent=state.undead_stack_count;$('market').replaceChildren(...state.market.map(c=>cardEl(c,()=>myTurn&&buyCard(c.id))));$('legend-market').replaceChildren(...state.legend_market.map(c=>cardEl(c,()=>myTurn&&buyCard(c.id))));$('buy-wild-btn').disabled=!myTurn;$('buy-familiar-btn').disabled=!myTurn||!me||me.familiar_bought;$('hand').replaceChildren(...(me?.hand||[]).map(c=>cardEl(c,()=>myTurn&&playCard(c))));$('attack-actions').replaceChildren(...(me?.available_attacks||[]).map(c=>deferredAttackButton(c,myTurn)));$('self-stats').innerHTML=me?`<div class="self-name">${escapeHtml(me.name)}${myTurn?' · ТВОЙ ХОД':''}</div><div class="self-meta"><span class="stat-chip health">♥ ${me.life}/${me.max_life}</span><span class="stat-chip power">⚡ ${me.power_available} мощи</span><span class="stat-chip">● ${me.chipsines} чипсин</span><span class="stat-chip">▣ ${me.deck_count} колода</span><span class="stat-chip">↻ ${me.discard_count} сброс</span><span class="stat-chip">☠ ${me.death_tokens} ЖДК</span></div>`:'';$('end-turn-btn').disabled=!myTurn;if(state.game_over&&!announcedGameOver){announcedGameOver=true;alert('Игра окончена! Победитель: '+(state.players.find(p=>p.id===state.winner)?.name||'?'))}}
+function renderDecision(decision){const modal=$('decision-modal');if(!decision||decision.waiting_for){modal.classList.add('hidden');return}$('decision-title').textContent=decision.title||'Выбери вариант';$('decision-text').textContent=decision.text||'';$('decision-options').replaceChildren(...(decision.options||[]).map(option=>{const button=document.createElement('button');button.className='target-button';button.innerHTML=`<b>${escapeHtml(option.label)}</b>${option.detail?`<small>${escapeHtml(option.detail)}</small>`:''}`;button.onclick=()=>{playSound('click');ws.send(JSON.stringify({action:'resolve_decision',option_id:option.id}))};return button}));modal.classList.remove('hidden')}
+function buyCard(cardId){playSound('click');ws.send(JSON.stringify({action:'buy_card',card_id:cardId}))}
+function playCard(card){if(card.id==='spec_wild'){$('wild-modal').classList.remove('hidden');return}if(card.has_attack){pendingAttackChoice=card;$('attack-card-name').textContent=card.name;$('attack-modal').classList.remove('hidden');return}sendPlay(card,{})}
+function playAttackNow(card){if(card.text&&card.text.toLowerCase().includes('выбранн'))openTargetModal(card);else sendPlay(card,{})}
+function deferredAttackButton(card,myTurn){const b=document.createElement('button');b.className='deferred-attack';b.disabled=!myTurn;b.innerHTML=`⚔ Атаковать: <b>${escapeHtml(card.name)}</b>`;b.onclick=()=>activateDeferredAttack(card);return b}
+function activateDeferredAttack(card){deferredAttackMode=true;if(card.text&&card.text.toLowerCase().includes('выбранн'))openTargetModal(card);else sendAttackActivation(card,{})}
+function openTargetModal(card){pendingTargetCard=card;$('target-card-name').textContent=card.name;const selfAllowed=card.id==='start_syrpal'||card.id==='start_hrenal';const targets=lastState.players.filter(p=>selfAllowed||p.id!==myId);$('target-list').replaceChildren(...targets.map(p=>{const b=document.createElement('button');b.className='target-button';b.innerHTML=`<b>${escapeHtml(p.name)}${p.id===myId?' · ты':''}</b><small>♥ ${p.life}/${p.max_life} · ☠ ЖДК ${p.death_tokens}</small>`;b.onclick=()=>{if(deferredAttackMode){sendAttackActivation(card,{target_id:p.id});deferredAttackMode=false}else{sendPlay(card,wildTargetMode?{choice:'steal',target_id:p.id}:{target_id:p.id})}wildTargetMode=false;closeTargetModal()};return b}));$('target-modal').classList.remove('hidden')}
+function closeTargetModal(){$('target-modal').classList.add('hidden');pendingTargetCard=null}
+function sendPlay(card,params){playSound('card');ws.send(JSON.stringify({action:'play_card',card_id:card.id,params}))}
+function sendAttackActivation(card,params){playSound('card');ws.send(JSON.stringify({action:'activate_attack',card_id:card.id,params}))}

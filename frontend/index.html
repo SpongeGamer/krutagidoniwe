@@ -1,52 +1,42 @@
 <!DOCTYPE html>
 <html lang="ru">
-<head>
-<meta charset="UTF-8">
-<title>Крутагидон Online</title>
-<link rel="stylesheet" href="style.css">
-</head>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Крутагидон Online</title><link rel="stylesheet" href="style.css?v=21"></head>
 <body>
-  <div id="join-screen" class="screen">
-    <h1>Крутагидон</h1>
-    <input id="name-input" placeholder="Твоё имя колдуна" />
-    <input id="room-input" placeholder="Код комнаты (придумай и скажи друзьям)" />
-    <button id="join-btn">Войти</button>
-  </div>
+<main>
+  <section id="join-screen" class="screen join-screen">
+    <div class="join-card"><div class="eyebrow">EPIC SPELL WARS</div><h1>Крутагидон<span>ONLINE</span></h1><p class="join-copy">Собери колдунов, разнеси врагов и забери главный приз.</p><div class="avatar-picker"><span>Твой колдун</span><div class="avatar-carousel"><button id="avatar-prev" class="avatar-arrow" aria-label="Предыдущий аватар">‹</button><div id="avatar-current" class="avatar-current" aria-live="polite">🐈‍⬛</div><button id="avatar-next" class="avatar-arrow" aria-label="Следующий аватар">›</button></div><div id="avatar-name" class="avatar-name">Чёрный кот</div></div><label>Имя колдуна<input id="name-input" placeholder="Например, Баба Катя" autocomplete="nickname"></label><label>Код комнаты<input id="room-input" placeholder="Придумай код для друзей" autocomplete="off"></label><button id="join-btn" class="button-primary">Войти в Крутагидон</button></div>
+  </section>
 
-  <div id="lobby-screen" class="screen hidden">
-    <h2>Лобби комнаты <span id="lobby-room-code"></span></h2>
-    <ul id="lobby-players"></ul>
-    <button id="start-btn">Начать игру</button>
-    <p class="hint">Начать может любой, как только все зашли.</p>
-  </div>
+  <section id="lobby-screen" class="screen lobby-screen hidden">
+    <div class="lobby-card"><div class="eyebrow">КОМНАТА</div><h2 id="lobby-room-code"></h2><p class="hint">Каждому колдуну выпадут два свойства. Выбери одно перед стартом.</p><div id="familiar-picker" class="property-choice hidden"><div id="familiar-choice-title" class="choice-title">Выбери фамильяра</div><div id="familiar-options" class="familiar-options"></div></div><div class="property-choice"><div class="choice-title">Выбери колдунское свойство</div><div id="property-options" class="property-options"></div></div><div id="host-settings" class="host-settings hidden"><div class="choice-title">Настройки комнаты · хост</div><label>Жетоны дохлых колдунов<select id="zhdk-mode"><option value="standard">Стандарт: 4 × число игроков</option><option value="all">Все 35 жетонов</option><option value="custom">Своё количество</option></select></label><input id="zhdk-custom" class="hidden" type="number" min="1" max="35" value="12"><button id="save-room-settings" class="small-action">Сохранить настройки</button></div><ul id="lobby-players" class="lobby-players"></ul><button id="start-btn" class="button-primary">Начать игру</button></div>
+  </section>
 
-  <div id="game-screen" class="screen hidden">
-    <div id="log-panel"></div>
+  <section id="game-screen" class="screen game-screen hidden">
+    <header class="game-header"><div class="brand"><span>КРУТА</span>ГИДОН <small>ONLINE</small></div><div id="turn-banner" class="turn-banner">Подготовка партии</div><div class="header-tools"><button id="sound-toggle" class="sound-toggle" title="Включить или выключить звуки">🔊</button><div class="room-pill">КОМНАТА <b id="room-code-game">—</b></div></div></header>
+    <div class="board-shell">
+      <aside class="supply-rail">
+        <button class="supply-stack" title="Основная колода"><img src="assets/cards/card_closed.webp" alt="Основная колода"><span>Барахолка <b id="main-deck-count"></b></span></button>
+        <button class="supply-stack legend-stack" title="Колода легенд"><img src="assets/cards/card_closed.webp" alt="Колода легенд"><span>Легенды <b id="legend-deck-count"></b></span></button>
+        <div class="token-stack"><img src="assets/tokens/zdk.webp" alt="Жетон дохлого колдуна"><span>ЖДК<br><b id="zhdk-count">—</b></span></div><div class="prize-mini"><img src="assets/prize/prize.webp" alt="Главный приз"><span>Приз</span></div><div class="vyal-stack"><img src="assets/cards/spec_vyal.webp" alt="Вялая палочка"><span>Вялые<br><b id="vyal-count">—</b></span></div>
+        <button id="log-toggle" class="log-toggle">События</button><div class="event-feed"><button id="log-close" class="modal-close">×</button><div class="panel-heading"><span>События партии</span></div><div id="log-panel"></div></div>
+      </aside>
 
-    <div id="opponents"></div>
+      <section class="table-stage">
+        <div id="opponents" class="players-orbit"></div><div id="played-cards" class="played-cards"></div>
+        <div class="stage-caption">Карты на барахолке и легенды — справа. Наведи курсор или нажми, чтобы развернуть.</div>
+      </section>
 
-    <div id="markets">
-      <div class="market-block">
-        <h3>Барахолка (осн. колода: <span id="main-deck-count"></span>)</h3>
-        <div id="market" class="card-row"></div>
-      </div>
-      <div class="market-block">
-        <h3>Барахолка легенд (колода легенд: <span id="legend-deck-count"></span>)</h3>
-        <div id="legend-market" class="card-row"></div>
-      </div>
-      <div class="market-block">
-        <button id="buy-wild-btn">Купить Шальную магию (3 мощи, осталось <span id="wild-count"></span>)</button>
-        <button id="buy-familiar-btn">Купить фамильяра (6 мощи)</button>
-      </div>
+      <aside class="market-rail">
+        <section class="market-drawer main-drawer"><button class="drawer-tab"><span>БАРАХОЛКА</span><b>›</b></button><div class="drawer-content"><div class="drawer-heading">Барахолка</div><div id="market" class="drawer-cards"></div></div></section>
+        <section class="market-drawer legend-drawer"><button class="drawer-tab"><span>ЗАЛ ЛЕГЕНД</span><b>›</b></button><div class="drawer-content"><div class="drawer-heading">Легенды</div><div id="legend-market" class="drawer-cards"></div></div></section>
+        <div class="special-actions"><button id="buy-wild-btn" class="small-action wild-action"><img src="assets/cards/spec_wild.webp" alt="Шальная магия"><span>Шальная магия <b id="wild-count"></b></span></button><button id="buy-familiar-btn" class="small-action">Фамильяр · 6</button></div>
+      </aside>
     </div>
 
-    <div id="self-panel">
-      <div id="self-stats"></div>
-      <div id="hand" class="card-row"></div>
-      <button id="end-turn-btn">Закончить ход</button>
-    </div>
-  </div>
+    <section id="self-panel" class="self-dock"><div class="self-toolbar"><div id="self-stats"></div><button id="end-turn-btn" class="button-primary end-turn">Закончить ход <span>→</span></button></div><div id="attack-actions" class="attack-actions"></div><div class="hand-label">Твоя рука</div><div id="hand" class="hand-row"></div></section>
+  </section>
+</main>
 
-<script src="app.js"></script>
-</body>
-</html>
+<div id="target-modal" class="modal hidden" role="dialog" aria-modal="true"><div class="modal-card"><button id="target-cancel" class="modal-close">×</button><div class="eyebrow">РОЗЫГРЫШ КАРТЫ</div><h2>Выбери игрока для атаки</h2><p id="target-card-name"></p><div id="target-list" class="target-list"></div></div></div><div id="decision-modal" class="modal hidden"><div class="modal-card"><div class="eyebrow">НУЖНО РЕШЕНИЕ</div><h2 id="decision-title">Выбери вариант</h2><p id="decision-text"></p><div id="decision-options" class="target-list"></div></div></div><div id="attack-modal" class="modal hidden"><div class="modal-card"><button id="attack-cancel" class="modal-close">×</button><div class="eyebrow">РОЗЫГРЫШ АТАКУЮЩЕЙ КАРТЫ</div><h2 id="attack-card-name">Атака</h2><p>Мощь получишь сразу. Атаку можно провести сейчас или оставить доступной до конца этого хода.</p><div class="target-list"><button id="attack-later" class="target-button"><b>⚡ Мощь сейчас, атаку позже</b><small>Карта останется в панели действий</small></button><button id="attack-now" class="target-button"><b>⚔ Атаковать сейчас</b><small>Сразу выберешь цель, если она нужна</small></button></div></div></div><div id="wild-modal" class="modal hidden"><div class="modal-card"><button id="wild-cancel" class="modal-close">×</button><div class="eyebrow">ШАЛЬНАЯ МАГИЯ</div><h2>Выбери эффект</h2><p>Можно быстро получить мощь или сыграть верхнюю карту из колоды врага.</p><div class="target-list"><button id="wild-power" class="target-button"><b>⚡ Получить +2 мощи</b><small>Без выбора цели</small></button><button id="wild-steal" class="target-button"><b>🪄 Сыграть карту врага</b><small>Сначала выберешь врага</small></button></div></div></div>
+<script src="app.js?v=21"></script>
+</body></html>

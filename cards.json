@@ -2830,7 +2830,7 @@
     "type": "Волшебник",
     "legend_subtype": null,
     "cost": 4,
-    "power": 0,
+    "power": 2,
     "vp": 1,
     "has_attack": "нет",
     "attack_text": null,
