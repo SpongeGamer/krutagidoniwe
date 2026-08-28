@@ -1,18 +1,29 @@
-__pycache__/
-*.py[cod]
-.venv/
-venv/
+# --- Личное: НИКОГДА не должно попасть в репозиторий ---
+cloudpub_token.txt
+.config/
+.ssh/
+*.token
 .env
-.DS_Store
-node_modules/
-tests/e2e_*.js
-.pytest_cache/
-package.json
-package-lock.json
+
+# --- Программы-туннели (каждый скачивает сам) ---
+clo
+clo.exe
 cloudflared
 cloudflared.exe
 cloudflared.part
-clo
-clo.exe
-cloudpub_token.txt
+
+# --- Логи и кэши ---
 launcher.log
+*.log
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.DS_Store
+
+# --- Node (нужен только для моих тестов) ---
+node_modules/
+package.json
+package-lock.json
+tests/e2e_*.js

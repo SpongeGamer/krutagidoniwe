@@ -338,6 +338,16 @@ async def ws_endpoint(websocket: WebSocket, room_id: str):
             msg = await websocket.receive_json()
             action = msg.get("action")
 
+            # Пинг от клиента: держит соединение живым через прокси.
+            # CloudPub и подобные сервисы рвут WebSocket, если по нему
+            # долго ничего не идёт, — отсюда и вылетали 502 в лобби.
+            if action == "ping":
+                try:
+                    await websocket.send_json({"type": "pong"})
+                except Exception:
+                    pass
+                continue
+
             # --- Пауза: доступна всем, останавливает партию для отдыха ---
             if action == "toggle_pause":
                 if room.offline:

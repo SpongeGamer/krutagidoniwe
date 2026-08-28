@@ -36,16 +36,22 @@ function copyLink(input,btn){
   else{try{document.execCommand('copy');done()}catch(e){}}
 }
 /* ---------- Подключение с авто-восстановлением ---------- */
-let reconnectTimer=null,reconnectTries=0,wantConnection=false;
+let reconnectTimer=null,reconnectTries=0,wantConnection=false,keepAliveTimer=null;
 function connect(name){
   const saved=localStorage.getItem('krutagidon_pid_'+roomId);
   ws=new WebSocket(wsUrl(roomId));
   ws.onopen=()=>{
     reconnectTries=0;setLinkState(true);
     ws.send(JSON.stringify({name,avatar:chosenAvatar,player_id:saved||undefined}));
+    // Туннели (CloudPub и др.) рвут «молчащее» соединение — шлём пинг.
+    clearInterval(keepAliveTimer);
+    keepAliveTimer=setInterval(()=>{
+      if(ws&&ws.readyState===1){try{ws.send(JSON.stringify({action:'ping'}))}catch(e){}}
+    },20000);
   };
   ws.onmessage=e=>handleMessage(JSON.parse(e.data));
   ws.onclose=()=>{
+    clearInterval(keepAliveTimer);
     setLinkState(false);
     if(!wantConnection){$('join-btn').disabled=false;$('join-btn').textContent='Играть';return}
     // Связь оборвалась — молча пробуем вернуться, партия ждёт на паузе.
@@ -70,7 +76,7 @@ $("join-btn").onclick=()=>{
   connect(name);
 };
 $("name-input")?.addEventListener('keydown',e=>{if(e.key==='Enter')$('join-btn').click()});
-function handleMessage(msg){if(msg.type==='joined'){myId=msg.player_id;localStorage.setItem('krutagidon_pid_'+roomId,myId);$('lobby-room-code').textContent=roomId;$('room-code-game').textContent=roomId;const l=$('lobby-link');if(l)l.value=inviteUrl(roomId);if(!msg.returning)show('lobby-screen')}else if(msg.type==='lobby'){renderLobby(msg);if(msg.started)show('game-screen')}else if(msg.type==='state'){const motion=captureVisualMotion(msg.state.visual_event);lastState=msg.state;show('game-screen');render(msg.state);prepareVisualMotion(motion);requestAnimationFrame(()=>playVisualMotion(motion,msg.state.visual_event))}else if(msg.type==='error'){playSound('error');alert(msg.message)}}
+function handleMessage(msg){if(msg.type==='pong'){return}if(msg.type==='joined'){myId=msg.player_id;localStorage.setItem('krutagidon_pid_'+roomId,myId);$('lobby-room-code').textContent=roomId;$('room-code-game').textContent=roomId;const l=$('lobby-link');if(l)l.value=inviteUrl(roomId);if(!msg.returning)show('lobby-screen')}else if(msg.type==='lobby'){renderLobby(msg);if(msg.started)show('game-screen')}else if(msg.type==='state'){const motion=captureVisualMotion(msg.state.visual_event);lastState=msg.state;show('game-screen');render(msg.state);prepareVisualMotion(motion);requestAnimationFrame(()=>playVisualMotion(motion,msg.state.visual_event))}else if(msg.type==='error'){playSound('error');alert(msg.message)}}
 function show(id){['join-screen','lobby-screen','game-screen'].forEach(s=>$(s).classList.toggle('hidden',s!==id))}
 function renderLobby(msg){$('lobby-players').innerHTML=msg.players.map(p=>`<li>${escapeHtml(p.name)}${p.id===msg.host_id?' · хост':''} <span class="${p.ready?'ready':''}">${p.ready?'✓ готов':'выбирает свойство / фамильяра'}</span></li>`).join('');const hasProperty=Boolean(msg.selected_property_id);$('familiar-picker').classList.toggle('hidden',!hasProperty);if(hasProperty){const selected=msg.selected_familiar_ids||[];$('familiar-choice-title').textContent=msg.familiar_required===3?`Выбери фамильяров: ${selected.length}/3`:`Выбери одного фамильяра: ${selected.length}/1`;$('familiar-options').replaceChildren(...msg.familiar_choices.map(board=>familiarButton(board,selected)))}$('property-options').replaceChildren(...msg.property_choices.map(p=>propertyButton(p,msg.selected_property_id)));$('start-btn').disabled=msg.players.some(p=>!p.ready);$('host-settings').classList.toggle('hidden',!msg.is_host);$('add-bot-btn').classList.toggle('hidden',!msg.is_host);if(msg.is_host){$('zhdk-mode').value=msg.settings?.zhdk_mode||'standard';$('zhdk-custom').classList.toggle('hidden',$('zhdk-mode').value!=='custom');if(msg.settings?.zhdk_count)$('zhdk-custom').value=msg.settings.zhdk_count}}
 function boardToCard(board){return {id:board.familiar_id||board.id,name:board.familiar_name,type:board.type||'Фамильяр',cost:board.cost||0,power:board.power||0,vp:board.vp||0,text:board.familiar_text||''}}
@@ -177,7 +183,7 @@ function playVisualMotion(motion,event){
   }
 }
 /* ---------- Счётчики стопок и диагностика (v43) ---------- */
-const BUILD_TAG='v52';
+const BUILD_TAG='v53';
 function setPileCounts(me){
   const d=$('self-deck-count'),c=$('self-discard-count');
   if(d)d.textContent=(me&&Number.isFinite(me.deck_count))?me.deck_count:0;

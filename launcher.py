@@ -106,6 +106,25 @@ def http_ok(url: str, timeout: float = 12.0) -> bool:
         return False
 
 
+def kill_proc(proc) -> None:
+    """Убить процесс наверняка.
+
+    cloudflared на terminate() уходит в бесконечные повторы подключения
+    и продолжает засорять лог, мешая работающему туннелю.
+    """
+    if not proc or proc.poll() is not None:
+        return
+    try:
+        proc.terminate()
+        proc.wait(timeout=4)
+    except Exception:
+        try:
+            proc.kill()
+            proc.wait(timeout=3)
+        except Exception:
+            pass
+
+
 def install_deps() -> bool:
     try:
         import fastapi  # noqa: F401
@@ -250,7 +269,7 @@ def start_tunnel(binary: Path, logfile, protocol: str = "auto") -> tuple[subproc
     url = found.get("url")
     if not url:
         say(" — адрес не пришёл")
-        proc.terminate()
+        kill_proc(proc)
         return None, None
     say(f"\n   адрес: {url}")
 
@@ -283,7 +302,7 @@ def start_tunnel(binary: Path, logfile, protocol: str = "auto") -> tuple[subproc
         return proc, url
 
     say(" не отвечает")
-    proc.terminate()
+    kill_proc(proc)
     return None, None
 
 
@@ -304,6 +323,7 @@ def open_tunnel(binary: Path, logfile) -> tuple[subprocess.Popen | None, str | N
         proc, url = start_tunnel(binary, logfile, protocol)
         if url:
             return proc, url
+        kill_proc(proc)          # не оставляем висеть неудачную попытку
         say("   не вышло")
         time.sleep(2)
     return None, None
@@ -360,7 +380,27 @@ CLOUDPUB_URLS = {
     ("Darwin", "x86_64"): "https://cloudpub.ru/download/stable/clo-3.4.889-stable-macos-x86_64.tar.gz",
     ("Darwin", "arm64"): "https://cloudpub.ru/download/stable/clo-3.4.889-stable-macos-aarch64.tar.gz",
 }
-TOKEN_FILE = ROOT / "cloudpub_token.txt"
+def _token_file() -> Path:
+    """Токен храним ВНЕ папки игры — в личных настройках пользователя.
+
+    Так его физически невозможно случайно закоммитить в git, даже если
+    кто-то удалит .gitignore. Старый файл рядом с игрой подхватываем
+    один раз и переносим.
+    """
+    if platform.system() == "Windows":
+        base = Path(os.environ.get("APPDATA", Path.home()))
+    else:
+        base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    folder = base / "krutagidon"
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        return ROOT / "cloudpub_token.txt"
+    return folder / "cloudpub_token.txt"
+
+
+TOKEN_FILE = _token_file()
+_OLD_TOKEN_FILE = ROOT / "cloudpub_token.txt"
 
 
 def cloudpub_path() -> Path | None:
@@ -405,6 +445,17 @@ def cloudpub_path() -> Path | None:
 def saved_token() -> str:
     if TOKEN_FILE.exists():
         return TOKEN_FILE.read_text(encoding="utf-8").strip()
+    # Переезд со старого места: забираем токен и убираем его из папки игры.
+    if _OLD_TOKEN_FILE.exists():
+        token = _OLD_TOKEN_FILE.read_text(encoding="utf-8").strip()
+        if token:
+            try:
+                TOKEN_FILE.write_text(token, encoding="utf-8")
+                _OLD_TOKEN_FILE.unlink()
+                say("  Токен перенесён в личные настройки — из папки игры удалён.")
+            except Exception:
+                pass
+        return token
     return ""
 
 
@@ -495,7 +546,7 @@ def start_cloudpub(logfile, interactive: bool = True) -> tuple[subprocess.Popen 
     url = found.get("url")
     if not url:
         say(" — адрес не пришёл")
-        proc.terminate()
+        kill_proc(proc)
         return None, None
     say(f"\n   адрес: {url}")
 
@@ -507,7 +558,7 @@ def start_cloudpub(logfile, interactive: bool = True) -> tuple[subprocess.Popen 
             return proc, url
         time.sleep(1.5)
     say(" не отвечает")
-    proc.terminate()
+    kill_proc(proc)
     return None, None
 
 
@@ -566,7 +617,7 @@ def start_pinggy(logfile) -> tuple[subprocess.Popen | None, str | None]:
     url = found.get("url")
     if not url:
         say(" — адрес не пришёл")
-        proc.terminate()
+        kill_proc(proc)
         return None, None
     say(f"\n   адрес: {url}")
 
@@ -578,7 +629,7 @@ def start_pinggy(logfile) -> tuple[subprocess.Popen | None, str | None]:
             return proc, url
         time.sleep(1.5)
     say(" не отвечает")
-    proc.terminate()
+    kill_proc(proc)
     return None, None
 
 
@@ -623,7 +674,7 @@ def start_localtunnel(logfile) -> tuple[subprocess.Popen | None, str | None]:
         time.sleep(0.5)
     url = found.get("url")
     if not url:
-        proc.terminate()
+        kill_proc(proc)
         return None, None
 
     print("   проверяю запасную ссылку", end="", flush=True)
@@ -634,7 +685,7 @@ def start_localtunnel(logfile) -> tuple[subprocess.Popen | None, str | None]:
             return proc, url
         time.sleep(1.5)
     say(" не отвечает")
-    proc.terminate()
+    kill_proc(proc)
     return None, None
 
 
@@ -740,12 +791,7 @@ def main() -> int:
 
             say()
             say("Ссылка перестала отвечать — поднимаю заново…")
-            if tunnel and tunnel.poll() is None:
-                tunnel.terminate()
-                try:
-                    tunnel.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    tunnel.kill()
+            kill_proc(tunnel)
 
             tunnel, new_url, _k = open_any_tunnel(binary, logfile)
             if new_url:
@@ -767,12 +813,7 @@ def main() -> int:
         say("Останавливаю игру…")
     finally:
         for proc in (tunnel, server):
-            if proc and proc.poll() is None:
-                proc.terminate()
-                try:
-                    proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
+            kill_proc(proc)
         logfile.close()
         say("Готово. До встречи!")
     return 0
