@@ -2,6 +2,11 @@
 from .effects import effect
 
 
+def _brief(game, cid):
+    c = game.cards[cid]
+    return {"id":c.id,"name":c.name,"type":c.type,"cost":c.cost,"power":c.power,"vp":c.vp,"has_attack":c.has_attack,"text":c.full_text}
+
+
 def _destroy_choice(game, player, title, text, zones, after=None):
     options = [{"id": "skip", "label": "Не уничтожать"}]
     for zone in zones:
@@ -42,7 +47,7 @@ def poopie(game, player, card, **kw):
         else:
             player.discard.append(cid)
             player.power_available += revealed.cost
-    game.request_decision(player, "Говна-пирога", f"Раскрыта карта «{revealed.name}» стоимостью {revealed.cost}.", options, resolve)
+    game.request_decision(player, "Говна-пирога", f"Раскрыта карта «{revealed.name}» стоимостью {revealed.cost}.", options, resolve, revealed_cards=[_brief(game, cid)])
 
 
 @effect("treas_totemhelm")
@@ -77,4 +82,4 @@ def vomitcan(game, player, card, **kw):
         def attack(target_id):
             game.deal_damage(player, target_id, revealed.cost, card.name)
         game.request_decision(player, "Пушка-блевушка", f"Выбери цель для {revealed.cost} урона.", targets, attack)
-    game.request_decision(player, "Пушка-блевушка", f"Раскрыта «{revealed.name}» стоимостью {revealed.cost}.", [{"id":"destroy","label":"Уничтожить карту"},{"id":"attack","label":"Атаковать на её стоимость"}], resolve)
+    game.request_decision(player, "Пушка-блевушка", f"Раскрыта «{revealed.name}» стоимостью {revealed.cost}.", [{"id":"destroy","label":"Уничтожить карту"},{"id":"attack","label":"Атаковать на её стоимость"}], resolve, revealed_cards=[_brief(game, cid)])

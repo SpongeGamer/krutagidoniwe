@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.DS_Store
+node_modules/
+tests/e2e_*.js
+.pytest_cache/
+package.json
+package-lock.json

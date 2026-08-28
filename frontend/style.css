@@ -45,3 +45,335 @@ input { user-select:text; -webkit-user-select:text; }
 /* Колдуны всегда выше разыгранных карт: карты не могут перекрывать интерфейс игрока. */
 .players-orbit{z-index:60}.opp-card{z-index:61}.played-cards{z-index:25}
 .vyal-stack{display:flex;align-items:center;gap:6px;width:150px;min-height:76px;padding:4px 6px;border:1px solid #ffffff12;border-radius:7px;color:#d9f3b5;background:linear-gradient(110deg,#16301d,#0d1b12);box-shadow:4px 4px 0 #090f0a}.vyal-stack img{width:43px;height:61px;object-fit:cover;border-radius:4px}.vyal-stack span{color:#d8f3a7;font-size:10px;font-weight:800;line-height:1.05}.vyal-stack b{display:block;margin-top:4px;color:#caff49;font-size:20px}
+.zone-label{margin:10px 0 4px;color:#e3c8dc;font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}.permanent-row{display:flex;gap:6px;min-height:0;overflow-x:auto}.permanent-row .card{flex-basis:72px;width:72px}.permanent-row .card:hover{transform:translateY(-12px) scale(1.12)}.event-card{text-align:center;border-color:#ffcf4d;box-shadow:0 0 40px #ff9f314d,0 20px 70px #000}.event-card h2{margin:10px 0;color:#ffdd73;font-size:30px}.event-card p{min-height:58px;color:#fff0c7;font-size:16px;line-height:1.35}.event-card .button-primary{margin-top:8px}
+.decision-card{width:min(820px,96vw)}.reveal-row{display:flex;justify-content:center;gap:10px;max-height:270px;margin:12px 0;overflow-x:auto;padding:8px}.reveal-row .card{flex:0 0 126px;width:126px;cursor:default}.reveal-row .card:hover{transform:none;filter:none}
+.permanent-row .card.is-actionable:after{content:'АКТИВИРОВАТЬ';position:absolute;left:3px;right:3px;bottom:3px;padding:3px;border-radius:4px;color:#2a1605;font-size:8px;font-weight:900;text-align:center;background:#ffd24d}.permanent-row .card.is-actionable{outline:1px solid #ffd24d;cursor:pointer}
+/* Рассадка вокруг стола: игрок 0 — владелец нижней руки, остальные по кругу. */
+.table-stage{overflow:visible;background:radial-gradient(ellipse at 50% 48%,#59334d 0%,#37203f 55%,#21142c 100%)}
+.table-stage:before{inset:4% 5%;width:auto;height:auto;border:0;border-radius:28px;background:repeating-linear-gradient(135deg,rgba(255,221,141,.025) 0 1px,transparent 1px 6px),repeating-linear-gradient(45deg,rgba(0,0,0,.08) 0 1px,transparent 1px 10px);box-shadow:inset 0 0 70px #100716aa}
+.players-orbit{position:absolute;z-index:60;inset:0;display:block;pointer-events:none}.player-seat{position:absolute;z-index:61;pointer-events:auto;width:166px;transform:translate(-50%,-50%)}
+/* Я — у нижней кромки, возле собственной руки. */
+.seat-0{left:50%;top:auto;bottom:14px;transform:translateX(-50%)}
+/* При 2 игроках противник напротив. */
+.seat-1{left:50%;top:15%;}
+/* При 3–5 игроках последующие места естественно расходятся вокруг стола. */
+.seat-2{left:27%;top:24%}.seat-3{left:73%;top:24%}.seat-4{left:13%;top:53%}.seat-5{left:87%;top:53%}
+.played-cards{margin-top:20px;align-self:center;z-index:25}
+@media(max-width:850px){.player-seat{width:132px}.seat-0{bottom:8px}.seat-1{top:12%}.seat-2{left:24%;top:24%}.seat-3{left:76%;top:24%}.seat-4{left:10%;top:50%}.seat-5{left:90%;top:50%}}
+/* Настоящий цвет сукна: нефритовый бархат вместо полупрозрачной фиолетовой подложки. */
+.table-stage{background:radial-gradient(ellipse at 48% 44%,#315d52 0%,#173b35 48%,#0d2523 100%)}
+.table-stage:before{background:repeating-linear-gradient(135deg,rgba(226,255,211,.045) 0 1px,transparent 1px 6px),repeating-linear-gradient(45deg,rgba(0,0,0,.12) 0 1px,transparent 1px 10px);box-shadow:inset 0 0 90px #061512cc}
+.activity-toast{position:absolute;z-index:80;left:50%;top:12px;transform:translateX(-50%);max-width:420px;padding:9px 15px;border:1px solid #ffd66d;border-radius:999px;color:#fff0c0;background:#1b402fef;box-shadow:0 5px 18px #0008;font-size:13px;text-align:center}.activity-toast span{color:#ffd35a;font-weight:800}
+.flying-card{position:fixed;z-index:500;display:grid;place-items:center;padding:6px;pointer-events:none;overflow:hidden;border:2px solid #ffd455;border-radius:8px;color:#1d1123;font-size:10px;font-weight:900;text-align:center;background:linear-gradient(135deg,#ffe78a,#ee9b36);box-shadow:0 12px 26px #0009;transition:left .78s cubic-bezier(.2,.8,.2,1),top .78s cubic-bezier(.2,.8,.2,1),width .78s ease,height .78s ease,opacity .78s ease,transform .78s ease;transform-origin:center}.flip-card{background:linear-gradient(135deg,#5b2c55,#20132a);color:#ffe2a1}.turn-overlay{position:fixed;z-index:400;left:50%;top:42%;transform:translate(-50%,-50%);padding:20px 28px;border:2px solid #ffd35a;border-radius:14px;color:#fff0ae;font-family:'Russo One',Impact,sans-serif;font-size:clamp(22px,4vw,44px);text-align:center;background:#1a3c31ed;box-shadow:0 0 45px #ffd03955;text-shadow:2px 2px #1b1820;animation:turnPop 1.3s ease both}@keyframes turnPop{0%{opacity:0;transform:translate(-50%,-40%) scale(.7)}18%{opacity:1;transform:translate(-50%,-50%) scale(1.04)}75%{opacity:1}100%{opacity:0;transform:translate(-50%,-60%) scale(.96)}}
+/* FLIP overlay: это реальный клон карты, не текстовая заглушка. */
+.flying-card.card{position:fixed;z-index:500;display:block;padding:0;pointer-events:none;overflow:hidden;border-radius:8px;background:#301d3b;box-shadow:0 18px 32px #000c;transform-style:preserve-3d;will-change:transform,opacity;transition:transform .88s cubic-bezier(.18,.78,.18,1),opacity .88s ease}.flying-card.card .cart-img{width:100%;height:100%;aspect-ratio:auto;object-fit:cover}.flying-card.card .card-info{display:none}.flying-card.card .cname{display:none}
+/* Лошара должен быть заметен с первого взгляда. */
+.loshara-player{border:2px solid #ff4d70!important;background:linear-gradient(135deg,#6a2038,#341128)!important;box-shadow:0 0 22px #ff315a8c!important}.loshara-player:before{content:'ЛОШАРА';position:absolute;right:7px;top:7px;padding:2px 5px;border-radius:4px;color:#fff;font-size:8px;font-weight:900;letter-spacing:.08em;background:#ef315b}.self-loshara{border-color:#ff4d70!important;background:linear-gradient(135deg,#68243d,#321127)!important;box-shadow:0 0 20px #ef31594d!important}.self-loshara .self-name{color:#ff9bad}.self-loshara .self-name:after{content:' ⚠';color:#ff4569}
+/* Целевая карта проявляется только после прилёта overlay-клона, иначе это выглядит как телепорт. */
+.motion-target-hidden{opacity:0!important;transition:opacity .12s ease}.motion-target-hidden.card{pointer-events:none}
+/* Карты на столе больше не участвуют в высоте документа: страница не прыгает при ходе. */
+.table-stage{min-height:590px;position:relative}.played-cards{position:absolute;z-index:25;left:50%;top:50%;width:min(650px,82%);min-height:0;margin:0;transform:translate(-50%,-50%);pointer-events:auto}.played-cards:empty{display:none}@media(max-width:850px){.table-stage{min-height:500px}.played-cards{width:76%;top:48%}}
+.activity-toast{transition:opacity .32s ease,transform .32s ease}.activity-toast.hidden{display:block!important;opacity:0;transform:translate(-50%,-10px);pointer-events:none}
+/* Планшет игрока: ресурсы и HP читаются отдельно, без мелкой каши. */
+.opp-card{min-height:174px;padding:10px 11px}.player-head{display:flex;align-items:center;gap:7px}.player-head .avatar{display:grid;place-items:center;width:30px;height:30px;border-radius:8px;font-size:20px;background:#4a2c52}.player-title{min-width:0;flex:1}.player-title .name{min-height:0;color:#fff0bc;font-size:14px;font-weight:900;line-height:1.08}.player-tags{min-height:12px;margin-top:2px;color:#ffd253;font-size:8px;font-weight:800}.player-health{display:flex;align-items:baseline;gap:4px;margin:8px 0 6px;padding:5px 7px;border-radius:7px;color:#ffe6e8;background:#6c3044}.player-health span{font-size:15px}.player-health b{font-size:21px;line-height:1}.player-health small{color:#ffd5da;font-size:10px;font-weight:800}.player-resources{display:grid;grid-template-columns:1fr 1fr;gap:5px}.resource{display:flex;flex-direction:column;padding:5px 6px;border-radius:6px;background:#24152f}.resource b{font-size:13px;line-height:1}.resource span{margin-top:3px;color:#d7c9d8;font-size:8px;font-weight:800;text-transform:uppercase}.power-resource{color:#2c1800;background:#ffd24a}.power-resource span{color:#6d4512}.chips-resource{color:#9ee6ff;background:#1d4250}.chips-resource span{color:#b9eafb}.player-piles{display:flex;justify-content:space-between;margin-top:7px;color:#d6c9da;font-size:10px;font-weight:800}.player-piles span{padding:2px 3px;border-radius:3px;background:#ffffff0c}.chips-bank{display:flex;align-items:center;gap:6px;width:150px;min-height:76px;padding:4px 6px;border:1px solid #ffffff12;border-radius:7px;color:#9ee6ff;background:linear-gradient(110deg,#123744,#0c2029);box-shadow:4px 4px 0 #070d12}.chips-bank img{width:48px;height:58px;object-fit:contain}.chips-bank span{font-size:10px;font-weight:800;line-height:1.05}.chips-bank b{display:block;margin-top:4px;color:#83ddff;font-size:20px}
+/* Компактный планшет: всё важное на одном уровне, подробности только по hover/тапу. */
+.opp-card{min-height:82px!important;padding:7px 8px!important;overflow:visible}.player-core{display:grid;grid-template-columns:31px minmax(0,1fr) 34px;align-items:center;gap:6px}.player-core>.avatar{display:grid;place-items:center;width:31px;height:31px;border-radius:8px;font-size:20px;background:#4a2c52}.player-center{min-width:0}.player-center .name{overflow:hidden;color:#fff0bc;font-size:12px;font-weight:900;line-height:1.05;text-overflow:ellipsis;white-space:nowrap}.core-stats{display:flex;gap:3px;margin-top:5px;white-space:nowrap}.core-stats b{padding:3px 4px;border-radius:4px;font-size:9px;background:#251630}.core-hp{color:#ffe2e6;background:#7a344a!important}.core-power{color:#311a00;background:#ffd24a!important}.core-chips{color:#a8eaff;background:#1d4a59!important}.core-zhdk{color:#ddd3de}.familiar-thumb{display:grid;place-items:center;width:34px;height:48px;overflow:hidden;border:1px solid #9bd9ed;border-radius:5px;color:#9bd9ed;background:#183140}.familiar-thumb img{width:100%;height:100%;object-fit:cover}.player-details{position:absolute;z-index:75;left:0;right:0;top:calc(100% + 4px);display:none;padding:8px;border:1px solid #ffd45d;border-radius:7px;color:#eaddea;font-size:10px;line-height:1.35;background:#24142df5;box-shadow:0 8px 18px #0009}.opp-card:hover .player-details,.opp-card:focus-within .player-details{display:block}.player-details .property-mini{display:block;width:100%;margin-top:5px;padding:4px;color:#ffe5a0;font-size:9px;text-align:left;background:#3a2144}.buy-familiar-btn{display:flex!important;align-items:center;gap:4px}.buy-fam-thumb{width:28px;height:38px;object-fit:cover;border-radius:4px}.buy-familiar-btn span{font-size:9px;line-height:1.05}
+.card-zoom{position:absolute;z-index:5;right:4px;top:4px;display:grid;place-items:center;width:22px;height:22px;padding:0;border:1px solid #ffe079;border-radius:50%;color:#2c1730;font-size:17px;font-weight:900;line-height:1;background:#ffe079;box-shadow:0 2px 6px #0009;opacity:0;transition:opacity .16s}.card:hover .card-zoom,.card:focus-within .card-zoom{opacity:1}.card-inspector{display:grid;grid-template-columns:minmax(180px,300px) minmax(220px,1fr);gap:20px;width:min(760px,94vw);text-align:left}.inspect-visual{display:grid;place-items:center;min-height:300px}.inspect-card{width:100%!important;max-width:280px!important;cursor:default!important}.inspect-card:hover{transform:none!important;filter:none!important}.inspect-card .card-zoom{display:none}.inspect-copy h2{margin:8px 0;color:#ffe5a1;font-size:26px}.inspect-copy p{color:#eee0ee;font-size:15px;line-height:1.4}.inspect-stats{display:flex;gap:7px;margin:10px 0}.inspect-stats b{padding:6px 8px;border-radius:6px;color:#2b1720;background:#ffe178;font-size:13px}.inspect-stats b:nth-child(2){background:#b8ef87}.inspect-stats b:nth-child(3){background:#93dcff}@media(max-width:600px){.card-inspector{grid-template-columns:1fr;gap:8px}.inspect-visual{min-height:180px}.inspect-card{max-width:180px!important}.card-zoom{opacity:1;width:20px;height:20px;font-size:15px}}
+/* Финальная иерархия планшета: подробности не имеют права жить в основной карточке. */
+.opp-card{min-height:78px!important}.player-core{grid-template-columns:34px minmax(0,1fr) 46px!important}.player-core>.avatar{width:34px!important;height:34px!important;margin-left:-1px}.player-center .name{font-size:13px!important}.core-stats b{font-size:10px!important}.familiar-thumb{width:46px!important;height:62px!important;cursor:pointer;transition:transform .16s,box-shadow .16s}.familiar-thumb:hover{transform:scale(1.16);box-shadow:0 5px 14px #000b}.player-details{display:none!important}.property-mini{border:1px solid #b68bd0!important;border-radius:5px!important;color:#f4ddff!important;background:#3c2349!important;font-size:9px!important}.player-details .property-mini{display:block!important}@media(hover:hover){.opp-card:hover .player-details{display:block!important}}@media(hover:none){.opp-card:active .player-details{display:block!important}}
+/* Планшет строго из трёх зон: аватар / основная информация / фамильяр. */
+.opp-card{width:250px!important;min-height:92px!important;padding:6px!important;overflow:visible}.player-core{display:grid!important;grid-template-columns:54px minmax(0,1fr) 62px!important;align-items:stretch;gap:7px}.avatar-box{display:grid;place-items:center;width:54px;min-height:72px;border:2px solid #1b0e20;border-radius:12px;font-size:32px;background:#17101b;box-shadow:inset 0 0 0 1px #ffffff18}.player-main{display:flex;min-width:0;flex-direction:column;justify-content:center;padding:4px 2px}.player-name{overflow:visible!important;color:#fff0bd;font-size:15px!important;font-weight:900;line-height:1.15;text-align:center;white-space:normal!important;word-break:break-word}.main-stats{display:flex;justify-content:center;gap:4px;margin-top:7px;white-space:nowrap}.main-stats span{padding:4px 5px;border-radius:5px;font-size:10px;font-weight:800;background:#2a1833}.main-hp{color:#ffe7eb;background:#73344a!important}.main-chips{color:#b8efff;background:#1c4a58!important}.main-zhdk{color:#f1e4f1;background:#34233d!important}.familiar-card{display:grid;place-items:center;width:62px;min-height:78px;padding:0;overflow:hidden;border:2px solid #9ed7e7;border-radius:8px;color:#9ed7e7;font-size:28px;background:#193341;cursor:pointer;box-shadow:0 4px 9px #0008}.familiar-card img{width:100%;height:100%;object-fit:cover}.seat-power{position:absolute;z-index:70;left:50%;top:-34px;transform:translateX(-50%);padding:6px 10px;border:2px solid #ffd24d;border-radius:8px;color:#2c1905;font-size:13px;font-weight:900;white-space:nowrap;background:#ffd24d;box-shadow:0 4px 10px #0008}.loshara-label{margin-top:4px;color:#ff9eae;font-size:8px;font-weight:900;text-align:center}.stage-caption{display:none!important}.opp-card .avatar,.opp-card .player-head,.opp-card .player-center,.opp-card .player-resources,.opp-card .player-health,.opp-card .player-piles{display:none!important}
+@media(max-width:850px){.opp-card{width:210px!important}.player-core{grid-template-columns:45px minmax(0,1fr) 52px!important}.avatar-box{width:45px;min-height:64px;font-size:27px}.familiar-card{width:52px;min-height:64px}.player-name{font-size:12px!important}.main-stats{gap:2px}.main-stats span{padding:3px;font-size:8px}}
+/* Три ФИЗИЧЕСКИ РАЗДЕЛЬНЫХ блока вокруг игрока: никакой общей рамки. */
+.opp-card{background:transparent!important;border:0!important;box-shadow:none!important;padding:0!important;overflow:visible!important;min-height:78px!important}.player-core{grid-template-columns:58px minmax(132px,1fr) 68px!important;gap:12px!important}.avatar-box{width:58px!important;min-height:78px!important;border:0!important;border-radius:15px!important;background:#08090b!important;box-shadow:0 5px 12px #000a!important}.familiar-card{width:68px!important;min-height:84px!important;border:0!important;border-radius:12px!important;background:#08090b!important;box-shadow:0 5px 12px #000a!important}.player-main{min-height:78px;padding:7px 10px!important;border:2px solid #1b0e20;border-radius:16px!important;background:linear-gradient(135deg,#753680,#42204c)!important;box-shadow:0 5px 12px #0009!important}.active-turn .player-main{border-color:#ffd24d!important;box-shadow:0 0 16px #ffd24d75,0 5px 12px #0009!important}.seat-power{top:-39px!important;border:0!important;border-radius:14px!important;color:#fff3e4!important;background:#08090b!important;box-shadow:0 5px 12px #000b!important}.loshara-player .player-main{border-color:#ff4d70!important;background:linear-gradient(135deg,#7c2945,#421126)!important}.loshara-player:before{display:none!important}.player-details{left:70px!important;right:80px!important}.player-name{font-size:14px!important}.main-stats{margin-top:8px!important;gap:6px!important}.main-stats span{background:transparent!important;padding:0!important;font-size:10px!important}.main-hp{color:#ffe6e9!important}.main-chips{color:#b9efff!important}.main-zhdk{color:#f5e6f5!important}
+/* Никакой нижней hover-плашки у игрока: только три главные цифры. */
+.player-details{display:none!important}.opp-card{width:274px!important}.player-core{grid-template-columns:56px minmax(150px,1fr) 68px!important;gap:11px!important}.player-main{min-height:84px;padding:7px 8px!important}.player-name{min-height:27px;display:flex;align-items:center;justify-content:center;overflow:visible!important;font-size:13px!important;line-height:1.05;text-align:center;white-space:normal!important;word-break:break-word}.main-stats{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px!important;margin-top:5px!important}.main-stats span{display:flex;min-width:0;flex-direction:column;align-items:center;justify-content:center;padding:4px 2px!important;border-radius:6px!important}.main-stats i{font-style:normal;font-size:13px;line-height:1}.main-stats b{font-size:13px;line-height:1.1}.main-stats small{margin-top:2px;font-size:7px;font-weight:900;letter-spacing:.04em}.main-hp{background:#78354a!important;color:#ffecef!important}.main-chips{background:#1c4b5a!important;color:#bdf2ff!important}.main-zhdk{background:#32233b!important;color:#f5eafa!important}.player-prize{position:absolute;z-index:75;right:-22px;bottom:-14px;width:44px;height:68px;object-fit:contain;filter:drop-shadow(0 4px 6px #000)}
+@media(max-width:850px){.opp-card{width:232px!important}.player-core{grid-template-columns:48px minmax(128px,1fr) 56px!important;gap:7px!important}.avatar-box{width:48px!important;min-height:70px!important}.familiar-card{width:56px!important;min-height:72px!important}.main-stats b{font-size:11px}.main-stats small{font-size:6px}}
+/* Ресурсы игрока: только чипсины и ЖДК, HP — отдельная читаемая шкала. */
+.main-resources{display:flex;justify-content:center;gap:10px;margin-top:4px}.main-resources span{display:flex;align-items:center;gap:3px;color:#fff;font-size:12px;font-weight:900}.main-resources img{width:18px;height:18px;object-fit:contain}.hp-bar{position:relative;height:18px;margin-top:5px;overflow:hidden;border:1px solid #120914;border-radius:9px;color:#fff;text-align:center;background:#25132c}.hp-fill{position:absolute;z-index:0;left:0;top:0;bottom:0;border-radius:9px;background:linear-gradient(90deg,#be3552,#f26773)}.hp-bar span{position:relative;z-index:1;font-size:10px;font-weight:900;line-height:17px;text-shadow:1px 1px #35111b}.hand-zone{display:flex;align-items:flex-end;gap:12px}.self-piles{display:flex;gap:7px;flex:none}.self-pile{position:relative;width:64px;color:#f7e4b3;font-size:9px;font-weight:900;text-align:center}.self-pile img{display:block;width:58px;height:82px;object-fit:cover;border:1px solid #e2b955;border-radius:5px;box-shadow:3px 3px #160a1c}.self-pile b{position:absolute;right:0;top:-6px;display:grid;place-items:center;width:22px;height:22px;border-radius:50%;color:#251305;background:#ffd34e;font-size:11px}.self-pile span{display:block;margin-top:3px}.hand-content{min-width:0;flex:1}.hand-content .hand-row{margin:0}.self-meta .stat-chip:not(.health):not(.power){display:none}
+
+/* ================= v44: чипсы/ЖДК без рамок, HP по центру, выбор фамильяра ================= */
+
+/* 1. Убираем «колхозные» плашки у чипсин и ЖДК — только иконка и число */
+.main-resources{gap:14px!important}
+.main-resources span,
+.main-chips,
+.main-zhdk{
+  padding:0!important;
+  border:0!important;
+  border-radius:0!important;
+  background:none!important;
+  box-shadow:none!important;
+  color:#fff!important;
+  font-size:13px!important;
+  font-weight:900!important;
+  text-shadow:0 1px 2px #0009!important;
+}
+.main-resources img{width:19px!important;height:19px!important;filter:drop-shadow(0 1px 2px #0009)}
+
+/* 2. Надпись HP строго по центру полоски (flex вместо line-height) */
+.hp-bar{
+  display:flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  height:20px!important;
+  line-height:normal!important;
+}
+.hp-bar span{
+  line-height:1!important;
+  display:block!important;
+  margin:0!important;
+  padding:0!important;
+  font-size:11px!important;
+}
+
+/* 3. Карточка фамильяра в лобби: фото слева, текст полностью, кнопка выбора */
+.familiar-options{
+  grid-template-columns:repeat(2,minmax(0,1fr))!important;
+  max-height:none!important;
+  gap:12px!important;
+}
+.familiar-option{
+  display:grid!important;
+  grid-template-columns:88px minmax(0,1fr)!important;
+  gap:10px!important;
+  min-height:0!important;
+  padding:10px!important;
+  border:1px solid #ffffff26!important;
+  border-radius:12px!important;
+  background:#34203e!important;
+  text-align:left!important;
+  cursor:default;
+}
+.familiar-option.selected{
+  border-color:#ffd04e!important;
+  background:#4b2c40!important;
+  box-shadow:0 0 12px #ffc83d40!important;
+}
+.fam-photo{
+  position:relative;
+  overflow:hidden;
+  border-radius:9px;
+  background:#12080f;
+  cursor:zoom-in;
+  aspect-ratio:5/7;
+}
+.fam-photo img{display:block;width:100%;height:100%;object-fit:cover}
+.fam-zoom{
+  position:absolute;right:4px;bottom:4px;
+  width:24px;height:24px;
+  display:grid;place-items:center;
+  border:0;border-radius:50%;
+  color:#2b1720;background:#ffd875e0;
+  font-size:14px;font-weight:900;cursor:zoom-in;
+}
+.fam-body{display:flex;flex-direction:column;min-width:0}
+.familiar-option b{color:#ffdd82;font-size:13px;line-height:1.15}
+.familiar-option span{margin:3px 0;color:#93d6ff;font-size:11px;font-weight:700}
+/* Текст больше не обрезается */
+.familiar-option small{
+  display:block;
+  color:#e6d8e6;
+  font-size:11px;
+  line-height:1.35;
+  white-space:normal;
+  overflow:visible;
+  text-overflow:clip;
+}
+.fam-actions{margin-top:auto;padding-top:8px}
+.fam-pick{
+  width:100%;
+  padding:7px 10px;
+  border:0;border-radius:8px;
+  color:#2b1720;background:#ffd34e;
+  font-size:12px;font-weight:900;cursor:pointer;
+}
+.familiar-option.selected .fam-pick{color:#fff;background:#7a3b58}
+.fam-pick:hover{filter:brightness(1.08)}
+
+/* 4. Модалка подтверждения фамильяра */
+.confirm-fam-card{width:min(560px,94vw);text-align:left}
+.confirm-fam-body{display:grid;grid-template-columns:150px minmax(0,1fr);gap:16px;margin:10px 0 4px}
+.confirm-fam-photo{overflow:hidden;border-radius:11px;background:#12080f;cursor:zoom-in;aspect-ratio:5/7}
+.confirm-fam-photo img{display:block;width:100%;height:100%;object-fit:cover}
+.confirm-fam-copy h2{margin:0 0 4px;color:#ffe5a1;font-size:20px;line-height:1.15}
+.confirm-fam-wizard{margin-bottom:8px;color:#93d6ff;font-size:12px;font-weight:800}
+.confirm-fam-copy p{color:#eee0ee;font-size:13px;line-height:1.45}
+.confirm-fam-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:14px}
+
+@media (max-width:900px){
+  .familiar-options{grid-template-columns:1fr!important}
+  .confirm-fam-body{grid-template-columns:120px minmax(0,1fr)}
+}
+
+/* ================= v45: карточки фамильяров — только крупная картинка ================= */
+
+/* Текст с карточек убран: всё описание напечатано на самой карте. */
+.familiar-option{
+  display:flex!important;
+  flex-direction:column!important;
+  grid-template-columns:none!important;
+  gap:9px!important;
+  padding:10px!important;
+  background:#2c1a35!important;
+}
+.familiar-option .fam-body{display:none!important}
+
+/* Картинка карты — крупная, целиком, без обрезки */
+.fam-photo{
+  width:100%;
+  aspect-ratio:auto!important;
+  background:transparent;
+  border-radius:10px;
+}
+.fam-photo img{
+  width:100%!important;
+  height:auto!important;
+  object-fit:contain!important;
+  display:block;
+  border-radius:10px;
+}
+.fam-zoom{
+  right:7px!important;bottom:7px!important;
+  width:30px!important;height:30px!important;
+  font-size:17px!important;
+  background:#ffd875f0!important;
+  box-shadow:0 2px 8px #000a;
+}
+.fam-photo:hover .fam-zoom{background:#ffe49a!important}
+
+/* Кнопка выбора — во всю ширину под картой */
+.familiar-option .fam-pick{
+  width:100%;
+  margin-top:auto;
+  padding:9px 10px!important;
+  font-size:13px!important;
+}
+
+/* Модалка подтверждения: только карта крупно + название */
+.confirm-fam-card{width:min(420px,94vw)!important;text-align:center!important}
+.confirm-fam-body{
+  display:block!important;
+  grid-template-columns:none!important;
+  margin:12px 0 6px!important;
+}
+.confirm-fam-photo{
+  width:min(300px,72vw);
+  margin:0 auto 12px;
+  aspect-ratio:auto!important;
+  background:transparent!important;
+  cursor:default!important;
+  border-radius:12px;
+}
+.confirm-fam-photo img{
+  width:100%!important;height:auto!important;
+  object-fit:contain!important;
+  border-radius:12px;
+  box-shadow:0 8px 24px #0008;
+}
+.confirm-fam-card h2{margin:0 0 4px!important;color:#ffe5a1;font-size:19px;line-height:1.2}
+.confirm-fam-wizard{margin-bottom:0!important;color:#93d6ff;font-size:12px;font-weight:800}
+.confirm-fam-actions{justify-content:center!important}
+
+@media (max-width:900px){
+  .familiar-options{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+}
+
+/* ================= v46: карты покупки крупнее и без подписей ================= */
+
+/* Правая колонка шире, чтобы вместить увеличенные карты */
+.market-rail{width:132px!important}
+.special-actions{display:grid!important;gap:10px!important;justify-items:end}
+
+/* Обе кнопки — просто крупная карта со счётчиком-бейджем, без текста */
+.small-action.wild-action,
+.small-action.fam-action{
+  position:relative;
+  width:118px!important;
+  padding:0!important;
+  overflow:visible!important;
+  border:0!important;
+  border-radius:9px!important;
+  background:transparent!important;
+}
+.small-action.wild-action img,
+.small-action.fam-action img{
+  display:block!important;
+  width:118px!important;
+  height:166px!important;
+  object-fit:cover!important;
+  border:2px solid #c79b4c!important;
+  border-radius:9px!important;
+  box-shadow:4px 5px #0f0716!important;
+  transition:transform .16s ease;
+}
+.small-action.wild-action:hover img,
+.small-action.fam-action:hover img{transform:translateY(-4px) scale(1.04)}
+/* Подписи под картами больше не выводим */
+.small-action.wild-action span,
+.small-action.fam-action span{display:none!important}
+
+/* Круглый счётчик поверх карты */
+.action-badge{
+  position:absolute;z-index:3;right:-7px;top:-7px;
+  display:grid;place-items:center;
+  min-width:28px;height:28px;padding:0 6px;
+  border-radius:99px;
+  color:#2b1705;background:#ffd34e;
+  font-size:13px;font-weight:900;
+  box-shadow:0 3px 9px #0009;
+}
+/* У кнопки фамильяра без картинки бейдж не должен висеть в пустоте */
+.small-action.fam-action{min-height:166px}
+.small-action.fam-action .buy-fam-thumb{
+  width:118px!important;height:166px!important;
+  border-radius:9px!important;
+}
+
+@media(max-width:850px){
+  .market-rail{width:96px!important}
+  .small-action.wild-action,.small-action.fam-action,
+  .small-action.wild-action img,.small-action.fam-action img,
+  .small-action.fam-action .buy-fam-thumb{width:86px!important}
+  .small-action.wild-action img,.small-action.fam-action img,
+  .small-action.fam-action .buy-fam-thumb{height:121px!important}
+  .small-action.fam-action{min-height:121px}
+}
+
+/* ================= v47: правая колонка не должна выпирать ================= */
+
+/* Колонка в сетке была 86px, а рельса — 132px: контент вылезал вправо
+   и всё выглядело сдвинутым. Приводим сетку и рельсу к одной ширине. */
+.board-shell{grid-template-columns:185px minmax(380px,1fr) 138px!important}
+.market-rail{
+  width:100%!important;
+  align-items:center!important;
+  padding-right:2px;
+}
+.special-actions{justify-items:center!important;width:100%}
+
+/* Ящики барахолки/легенд центрируем в колонке */
+.market-drawer{align-self:center}
+
+/* Лупа предпросмотра на картах покупки */
+.buy-zoom{
+  position:absolute;z-index:4;left:-8px;top:-8px;
+  display:grid;place-items:center;
+  width:26px;height:26px;
+  border:0;border-radius:50%;
+  color:#2b1720;background:#ffd875f0;
+  font-size:15px;font-weight:900;cursor:zoom-in;
+  box-shadow:0 2px 8px #000a;
+}
+.buy-zoom:hover{background:#ffe49a}
+
+@media(max-width:850px){
+  .board-shell{grid-template-columns:88px 1fr 100px!important}
+}
+@media(max-width:520px){
+  .board-shell{grid-template-columns:55px 1fr 58px!important}
+}
+
+/* ================= v48: кружки-бейджи на картах покупки убраны ================= */
+/* Стоимость и так напечатана на самой карте — дублировать её незачем. */
+.action-badge{display:none!important}

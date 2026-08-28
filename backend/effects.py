@@ -19,6 +19,22 @@ from typing import Callable
 
 EFFECT_REGISTRY: dict[str, Callable] = {}
 DEFENSE_REGISTRY: dict[str, Callable] = {}
+ACTIVATION_REGISTRY: dict[str, Callable] = {}
+
+
+def activation(card_id: str):
+    def deco(fn: Callable):
+        ACTIVATION_REGISTRY[card_id] = fn
+        return fn
+    return deco
+
+
+def apply_activation(game, player, card, **kwargs):
+    handler = ACTIVATION_REGISTRY.get(card.id)
+    if not handler:
+        return {"error": "У этой постоянки пока нет активируемого эффекта"}
+    handler(game, player, card, **kwargs)
+    return {"ok": True}
 
 
 def defense(card_id: str):
@@ -221,7 +237,10 @@ def _epicheart(game, player, card, **kw):
 def _endbro(game, player, card, **kw):
     if kw.get("attack_only", False): return
     game.draw_cards(player, 1)
-    options=[{"id":p.id,"label":p.name,"detail":f"Рука: {len(p.hand)} · Колода: {len(p.deck)}"} for p in game.players]
+    options=[{"id":p.id,"label":p.name,"detail":f"Рука: {len(p.hand)} · Колода: {len(p.deck)}"} for p in game.players if p.id != player.id]
+    # В одиночной тестовой партии другого колдуна нет: только собственный добор.
+    if not options:
+        return
     def give_card(target_id):
         target=game.get_player(target_id)
         if target: game.draw_cards(target,1)
@@ -266,3 +285,6 @@ def _def_conduct(game, defender, attacker, card):
     game.draw_cards(defender, 1)
 from . import effects_extra3  # noqa: E402,F401
 from . import effects_extra4  # noqa: E402,F401
+from . import effects_extra5  # noqa: E402,F401
+from . import effects_extra6  # noqa: E402,F401
+from . import effects_extra7  # noqa: E402,F401

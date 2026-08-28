@@ -115,8 +115,7 @@ def losharochka(game, player, card, **kw):
     if target:
         def make_loshara(hit_target, died):
             if died:
-                hit_target.is_loshara = True
-                hit_target.max_life = 15
+                game.set_loshara(hit_target, True)
         game.attack_target(player, card, target.id, 5, on_hit=make_loshara)
 
 
