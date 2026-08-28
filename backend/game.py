@@ -115,6 +115,7 @@ class GameState:
         self.destroyed_besp_pile: list[str] = []        # уничтоженные беспределы
         self.undead_token_stack: list[str] = []          # доступные ЖДК
         self.prize_holder: Optional[str] = None
+        self.final_scores: dict = {}
 
         self.pending_attack: Optional[dict] = None
         # Карта Беспредела/Мегабеспредела показана всем до выполнения эффекта.
@@ -162,16 +163,26 @@ class GameState:
         self._fill_market_no_resolve()
         self._fill_legend_market_no_resolve()
 
-        # ЖДК берём из отдельного файла zhdk.json (лист "Жетоны дохлых колдунов")
-        undead_ids = list(self.zhdk.keys())
+        # ЖДК берём из zhdk.json, но БЕЗ пяти Дохляков (sdk_*): это карты
+        # барахолки, они лишь считаются жетонами, а за смерть не выдаются.
+        undead_ids = self.death_token_pool()
         self.rng.shuffle(undead_ids)
         self.undead_token_stack = undead_ids[: 4 * len(self.players)] if undead_ids else []
 
         self.log("Партия подготовлена. Первый ход у " + self.players[0].name)
 
+    def death_token_pool(self) -> list[str]:
+        """Жетоны, которые можно получить за смерть.
+
+        Дохляки (sdk_1..sdk_5) сюда не входят: по правилам это карты
+        барахолки за 1 чипсину, они лишь СЧИТАЮТСЯ жетонами дохлого колдуна,
+        но из стопки смерти не выдаются.
+        """
+        return [tid for tid in self.zhdk if not tid.startswith("sdk_")]
+
     def configure_undead_stack(self, count: int):
         """Переопределить число ЖДК перед стартом партии настройкой комнаты."""
-        ids = list(self.zhdk.keys())
+        ids = self.death_token_pool()
         self.rng.shuffle(ids)
         self.undead_token_stack = ids[:max(0, min(int(count), len(ids)))]
 
@@ -448,6 +459,20 @@ class GameState:
         if static_power:
             p.power_available += static_power
             self.log(f"{p.name}: постоянки дают +{static_power} мощи")
+        # «Дорогой жетон» (dk_12): в свой ход можно откупиться 5 чипсинами.
+        if "dk_12" in p.death_tokens and p.chipsines >= 5:
+            def buy_off(choice: str, _p=p):
+                if choice == "yes" and _p.chipsines >= 5 and "dk_12" in _p.death_tokens:
+                    _p.chipsines -= 5
+                    _p.death_tokens.remove("dk_12")
+                    self.log(f"{_p.name}: платит 5 чипсин и уничтожает «Дорогой жетон»")
+            self.request_decision(
+                p, "Дорогой жетон",
+                "Потратить 5 чипсин, чтобы избавиться от этого жетона?",
+                [{"id": "yes", "label": "Заплатить 5 чипсин"},
+                 {"id": "no", "label": "Оставить жетон"}],
+                buy_off,
+            )
         if p.property_id == "svo_7":
             owned = sum(1 for cid in self.controlled_card_ids(p)
                         if {"Сокровище", "Тварь"} & self.cards[cid].types_for_matching)
@@ -512,8 +537,13 @@ class GameState:
         self.log(f"{card.type.upper()} показан: {card.full_text}")
 
     def resolve_event(self) -> dict:
-        if not self.pending_event or not self._pending_event_card:
+        if not self.pending_event:
             return {"error": "Нет события для продолжения"}
+        # Показ жетона ЖДК — просто информационное окно, карты за ним нет.
+        if not self._pending_event_card:
+            self.pending_event = None
+            self._resume_market_refill()
+            return {"ok": True}
         card = self._pending_event_card
         self.pending_event = None
         self._pending_event_card = None
@@ -572,6 +602,8 @@ class GameState:
         player.hand.remove(card_id)
         player.in_play_this_turn.append(card_id)
         player.power_available += card.power
+        if card.power:
+            self.log(f"{player.name}: «{card.name}» +{card.power} мощи (всего {player.power_available})")
         if "place_dirty" in player.zone_in_play and "Палочка" in card.name:
             player.power_available += 1
             self.log(f"{player.name}: «Грязная палка» — +1 мощь за Палочку")
@@ -944,6 +976,117 @@ class GameState:
             self.set_loshara(player, not player.is_loshara)
         elif token_id == "dk_29":
             self.give_weak_sticks(player, 1, "deck_top")
+        elif token_id == "dk_5":
+            # Выбери врага: он получает случайную карту из твоей стопки сброса.
+            enemies = [e for e in self.enemies_of(player) if e.is_alive()]
+            if enemies and player.discard:
+                options = [{"id": e.id, "label": e.name} for e in enemies]
+
+                def give(choice: str):
+                    target = self.get_player(choice)
+                    if not target or not player.discard:
+                        return
+                    cid = self.rng.choice(player.discard)
+                    player.discard.remove(cid)
+                    target.discard.append(cid)
+                    self.log(f"{target.name}: получает «{self.cards[cid].name}» из сброса {player.name}")
+
+                self.request_decision(player, "Сдача сброса",
+                                      "Кому подкинуть карту из своего сброса?", options, give)
+        elif token_id == "dk_6":
+            # Если тебя убил лошара — он может стать нормальным.
+            if killer and killer.is_loshara:
+                options = [{"id": "yes", "label": "Стать нормальным"},
+                           {"id": "no", "label": "Остаться лошарой"}]
+
+                def unlose(choice: str):
+                    if choice == "yes":
+                        self.set_loshara(killer, False)
+
+                self.request_decision(killer, "Разлошаривание",
+                                      f"Ты убил {player.name} и можешь перестать быть лошарой",
+                                      options, unlose)
+        elif token_id == "dk_7":
+            # Каждый враг МОЖЕТ передать тебе Знак с руки или из сброса.
+            enemies = [e for e in self.enemies_of(player) if e.is_alive()]
+
+            def opts_for(enemy):
+                has = "start_znak" in enemy.hand or "start_znak" in enemy.discard
+                base = [{"id": "no", "label": "Не отдавать"}]
+                return ([{"id": "give", "label": "Отдать Знак"}] + base) if has else base
+
+            def apply_choice(enemy, choice):
+                if choice != "give":
+                    return
+                for zone in (enemy.hand, enemy.discard):
+                    if "start_znak" in zone:
+                        zone.remove("start_znak")
+                        player.hand.append("start_znak")
+                        self.log(f"{enemy.name}: отдаёт Знак игроку {player.name}")
+                        return
+
+            if enemies:
+                self.request_decision_sequence(
+                    enemies, "Раздача знаков на спавне",
+                    lambda e: f"Отдать Знак игроку {player.name}?",
+                    opts_for, apply_choice)
+        elif token_id == "dk_10":
+            # После воскрешения поменяйся жизнями с любым другим колдуном.
+            others = [o for o in self.players if o.id != player.id and o.is_alive()]
+            if others:
+                options = [{"id": o.id, "label": f"{o.name} ({o.life} HP)"} for o in others]
+
+                def swap(choice: str):
+                    other = self.get_player(choice)
+                    if not other:
+                        return
+                    player.life, other.life = other.life, player.life
+                    player.life = min(player.life, player.max_life)
+                    other.life = min(other.life, other.max_life)
+                    self.log(f"{player.name} и {other.name} обменялись жизнями")
+
+                self.request_decision(player, "Жизненный обмен",
+                                      "С кем поменяться жизнями?", options, swap)
+        elif token_id == "dk_24":
+            # Раскрой верхнюю карту своей колоды. Можешь её уничтожить.
+            if not player.deck:
+                self.reshuffle_discard_into_deck(player)
+            if player.deck:
+                top_id = player.deck[-1]
+                top = self.cards[top_id]
+                options = [{"id": "kill", "label": f"Уничтожить «{top.name}»"},
+                           {"id": "keep", "label": "Оставить в колоде"}]
+
+                def choose(choice: str):
+                    if choice == "kill" and player.deck and player.deck[-1] == top_id:
+                        player.deck.pop()
+                        self.destroyed_pile.append(top_id)
+                        self.log(f"{player.name}: уничтожает «{top.name}»")
+
+                self.request_decision(player, "Халява!", f"Верхняя карта: {top.name}",
+                                      options, choose,
+                                      revealed_cards=[{"id": top.id, "name": top.name}])
+        elif token_id == "dk_27":
+            # Каждый враг МОЖЕТ показать средний палец: сбрось 1 карту за каждого.
+            enemies = [e for e in self.enemies_of(player) if e.is_alive()]
+
+            def finger_opts(enemy):
+                return [{"id": "yes", "label": "Показать средний палец"},
+                        {"id": "no", "label": "Воздержаться"}]
+
+            def finger_apply(enemy, choice):
+                if choice != "yes" or not player.hand:
+                    return
+                cid = self.rng.choice(player.hand)
+                player.hand.remove(cid)
+                player.discard.append(cid)
+                self.log(f"{enemy.name} показывает палец — {player.name} сбрасывает «{self.cards[cid].name}»")
+
+            if enemies:
+                self.request_decision_sequence(
+                    enemies, "Пошел ты!",
+                    lambda e: f"Показать средний палец игроку {player.name}?",
+                    finger_opts, finger_apply)
 
     def _handle_death(self, player: Player, killer: Optional[Player]):
         player.just_died = True
@@ -965,8 +1108,20 @@ class GameState:
         if self.undead_token_stack:
             token_id = self.undead_token_stack.pop()
             player.death_tokens.append(token_id)
-            tok_name = self.zhdk.get(token_id, {}).get("name", token_id)
-            self.log(f"{player.name} подох и получает ЖДК: {tok_name}")
+            tok = self.zhdk.get(token_id, {})
+            tok_name = tok.get("name", token_id)
+            tok_text = tok.get("effect_text", "")
+            self.log(f"{player.name} подох и получает ЖДК: {tok_name} — {tok_text}")
+            # Показываем жетон крупно: игрок должен видеть, что именно ему выпало.
+            self.pending_event = {
+                "id": token_id,
+                "name": tok_name,
+                "type": "Жетон дохлого колдуна",
+                "text": tok_text,
+                "owner_id": player.id,
+                "owner": player.name,
+            }
+            self._pending_event_card = None
         player.life = START_LIFE if not player.is_loshara else LOSHARA_MAX_LIFE
         if token_id:
             self._resolve_death_token(player, token_id, killer)
@@ -1014,6 +1169,10 @@ class GameState:
                 vp += sum(1 for cid in pool if self.cards[cid].type == WEAK_STICK_TYPE)
             if p.familiar_card_id and p.familiar_bought:
                 vp += self.cards[p.familiar_card_id].vp
+            # Главный приз Крутагидона даёт +5 ПО владельцу.
+            # Жетон «Неглавный приз» (dk_8) этот бонус отменяет.
+            if p.controls_prize and "dk_8" not in p.death_tokens:
+                vp += 5
             if p.is_loshara:
                 vp -= 5
             for tid in p.death_tokens:
@@ -1098,5 +1257,23 @@ class GameState:
             "undead_stack_count": len(self.undead_token_stack),
             "game_over": self.game_over,
             "winner": self.winner,
+            "final_scores": [
+                {
+                    "id": pl.id,
+                    "name": pl.name,
+                    "avatar": pl.avatar,
+                    "vp": self.final_scores[pl.id]["vp"],
+                    "legends": self.final_scores[pl.id]["legends"],
+                    "death_tokens": self.final_scores[pl.id]["death_tokens"],
+                    "is_loshara": pl.is_loshara,
+                    "controls_prize": pl.controls_prize,
+                }
+                for pl in sorted(
+                    self.players,
+                    key=lambda x: (-self.final_scores[x.id]["vp"],
+                                   -self.final_scores[x.id]["legends"],
+                                   self.final_scores[x.id]["death_tokens"]),
+                )
+            ] if self.final_scores else None,
             "logs": self.logs[-30:],
         }

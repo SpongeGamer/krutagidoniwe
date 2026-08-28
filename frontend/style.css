@@ -377,3 +377,86 @@ input { user-select:text; -webkit-user-select:text; }
 /* ================= v48: кружки-бейджи на картах покупки убраны ================= */
 /* Стоимость и так напечатана на самой карте — дублировать её незачем. */
 .action-badge{display:none!important}
+
+/* ================= v49: показ полученного жетона ЖДК ================= */
+.event-art{display:grid;place-items:center;margin:12px 0 6px}
+.event-art img{
+  width:min(230px,62vw);height:auto;
+  border-radius:11px;
+  box-shadow:0 8px 24px #000a;
+}
+.event-owner{
+  margin:2px 0 8px;
+  color:#ffd34e;font-size:13px;font-weight:900;
+  letter-spacing:.04em;
+}
+.event-card{text-align:center}
+.event-card h2{margin:6px 0 2px}
+
+/* ================= v50: купленный фамильяр уходит из колонки ================= */
+/* .hidden уже глобально display:none!important — карточка исчезает,
+   а Шальная магия поднимается на её место, т.к. .special-actions это grid. */
+.special-actions .small-action.hidden{display:none!important}
+
+/* ================= v51: экран итогов партии ================= */
+.gameover-card{width:min(560px,94vw);text-align:center}
+.gameover-card h2{margin:6px 0 14px;color:#ffe5a1}
+.gameover-table{display:grid;gap:7px;margin-bottom:16px;text-align:left}
+.score-row{
+  display:grid;
+  grid-template-columns:26px 28px minmax(0,1fr) auto auto;
+  align-items:center;gap:9px;
+  padding:9px 11px;
+  border:1px solid #ffffff1f;border-radius:10px;
+  background:#2c1a35;
+}
+.score-row.is-winner{border-color:#ffd04e;background:#4b2c40;box-shadow:0 0 12px #ffc83d33}
+.score-place{color:#ffd34e;font-weight:900;text-align:center}
+.score-ava{font-size:18px;text-align:center}
+.score-name{overflow:hidden;color:#ffe9ad;font-size:13px;font-weight:800;text-overflow:ellipsis;white-space:nowrap}
+.score-sub{color:#bfaec2;font-size:11px;white-space:nowrap}
+.score-vp{color:#ffd34e;font-size:15px;font-weight:900;white-space:nowrap}
+
+/* ================= v52: вход по ссылке, пауза, реконнект ================= */
+
+/* Приглашение на экране входа и в лобби */
+.room-invite{margin:14px 0 4px;color:#ffd879;font-size:13px;font-weight:800;text-align:left}
+.invite-row{display:flex;gap:7px;margin-top:6px}
+.invite-row input{
+  flex:1;min-width:0;margin:0;
+  padding:10px 12px;
+  border:1px solid #a56b9e;border-radius:9px;
+  color:#ffe9c0;background:#1b1022;
+  font-size:12px;
+}
+.invite-row .small-action{width:auto;flex:none;white-space:nowrap}
+.invite-hint{margin-top:6px;color:#c6b3c8;font-size:11px;font-weight:600}
+.lobby-invite{margin:10px 0 4px}
+
+/* Плашка «нет связи» */
+.link-state{
+  position:fixed;z-index:120;left:50%;top:12px;transform:translateX(-50%);
+  padding:8px 16px;border-radius:99px;
+  color:#2b1705;background:#ffd34e;
+  font-size:12px;font-weight:900;
+  box-shadow:0 6px 18px #0009;
+}
+
+/* Экран паузы */
+.pause-overlay{
+  position:fixed;z-index:115;inset:0;
+  display:grid;place-items:center;
+  padding:20px;
+  background:#07030bd9;
+  backdrop-filter:blur(3px);
+}
+.pause-card{
+  width:min(420px,94vw);padding:30px 26px;
+  border:1px solid #ffd267a3;border-radius:18px;
+  text-align:center;
+  background:linear-gradient(145deg,#4d2b51,#1d1026);
+  box-shadow:0 20px 70px #000;
+}
+.pause-icon{font-size:44px;line-height:1}
+.pause-card h2{margin:10px 0 6px;color:#ffe5a1;font-size:24px}
+.pause-card p{margin:0 0 18px;color:#e2cfe2;font-size:14px}

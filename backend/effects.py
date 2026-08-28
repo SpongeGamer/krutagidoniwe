@@ -164,7 +164,7 @@ def _ork(game, player, card, **kw):
         or any(game.cards[c].type == "Тварь" for c in player.zone_in_play)
     if has_other_beast:
         player.power_available += 2
-        game.log(f"{player.name}: {card.name} — доп. тварь на столе, +2 мощи")
+        game.log(f"{player.name}: {card.name} — есть ещё тварь, +2 мощи (всего {player.power_available})")
 
 
 @effect("spell_brainstrom")

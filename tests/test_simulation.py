@@ -200,3 +200,154 @@ def test_magicspill_destroys_own_hand():
 
     assert len(enemy.hand) == enemy_before, "рука врага не должна меняться"
     assert len(me.hand) < 3, "своя рука должна уменьшиться"
+
+
+def test_dohlyaki_never_given_on_death():
+    """Дохляки (sdk_*) не выдаются за смерть — их только покупают."""
+    for seed in range(30):
+        game = GameState(["A", "B", "C"], seed=seed)
+        assert all(not t.startswith("sdk_") for t in game.undead_token_stack), \
+            f"seed={seed}: Дохляк попал в стопку смерти"
+
+        # добиваем игрока много раз подряд
+        victim = game.players[0]
+        killer = game.players[1]
+        for _ in range(12):
+            if not game.undead_token_stack:
+                break
+            game.deal_damage(killer, victim.id, 999, "тест", defendable=False)
+            _auto_resolve(game)
+        assert all(not t.startswith("sdk_") for t in victim.death_tokens), \
+            f"seed={seed}: игрок получил Дохляка за смерть: {victim.death_tokens}"
+
+
+def test_death_token_pool_excludes_dohlyaki():
+    """Пул жетонов смерти — ровно 30 настоящих ЖДК из 35 записей."""
+    game = GameState(["A", "B"], seed=1)
+    pool = game.death_token_pool()
+    assert len(pool) == 30, f"в пуле {len(pool)} жетонов, ожидалось 30"
+    assert not any(t.startswith("sdk_") for t in pool)
+
+
+def test_custom_stack_also_excludes_dohlyaki():
+    """Ручная настройка числа ЖДК тоже не тянет Дохляков."""
+    game = GameState(["A", "B"], seed=2)
+    game.configure_undead_stack(35)
+    assert len(game.undead_token_stack) == 30, "больше 30 настоящих жетонов не бывает"
+    assert not any(t.startswith("sdk_") for t in game.undead_token_stack)
+
+
+def test_death_shows_token_to_player():
+    """При смерти игроку показывается, какой именно жетон он получил."""
+    game = GameState(["A", "B"], seed=4)
+    victim = game.players[0]
+    killer = game.players[1]
+    game.deal_damage(killer, victim.id, 999, "тест", defendable=False)
+
+    event = game.pending_event
+    assert event, "окно с жетоном не появилось"
+    assert event["type"] == "Жетон дохлого колдуна"
+    assert event["id"] == victim.death_tokens[-1], "показан не тот жетон"
+    assert event["name"], "у жетона нет названия"
+    assert event["owner_id"] == victim.id, "не указан получатель"
+
+    # окно закрывается без ошибок
+    assert not game.resolve_event().get("error")
+    assert game.pending_event is None
+
+
+def test_conditional_power_beasts():
+    """Твари с условием «ещё 1 тварь» дают доп. мощь корректно."""
+    def power_after(setup, play):
+        game = GameState(["Я", "Враг"], seed=3)
+        me = game.active_player
+        foe = game.enemies_of(me)[0]
+        foe.hand = []
+        for cid in setup:
+            me.hand = [cid]
+            game.play_card(me, cid, target_id=foe.id)
+            game.pending_decision = None
+        me.power_available = 0
+        me.hand = [play]
+        game.play_card(me, play, target_id=foe.id)
+        return me.power_available
+
+    # Приунывший орк: +2, и ещё +2 если есть другая тварь
+    assert power_after([], "beast_ork") == 2
+    assert power_after(["beast_kinky"], "beast_ork") == 4, "Развратот на столе не дал Орку +2"
+    assert power_after(["beast_beer"], "beast_ork") == 4
+    # Условие «хотя бы одна», а не «за каждую» — два зверя дают те же +2
+    assert power_after(["beast_kinky", "beast_beer"], "beast_ork") == 4
+
+    # Трахангутан: +3 за КАЖДУЮ тварь под контролем
+    assert power_after([], "beast_orangutan") == 3
+    assert power_after(["beast_ork"], "beast_orangutan") == 6
+    assert power_after(["beast_ork", "beast_beer"], "beast_orangutan") == 9
+
+
+def test_familiar_bought_flag():
+    """После покупки фамильяра ставится флаг — фронт по нему прячет карточку."""
+    game = GameState(["A", "B"], seed=3)
+    me = game.active_player
+    me.familiar_card_id = "fam_benz"
+    me.familiar_card_ids = ["fam_benz"]
+    me.power_available = 10
+
+    assert me.familiar_bought is False
+    assert not game.buy_familiar(me).get("error")
+    assert me.familiar_bought is True, "флаг покупки не выставлен"
+    assert "fam_benz" in me.discard, "купленный фамильяр должен уйти в сброс"
+    assert me.power_available == 4, "стоимость 6 мощи не списана"
+
+
+def test_all_death_tokens_resolve():
+    """Каждый из 30 жетонов ЖДК отрабатывает без падений."""
+    import json
+    path = os.path.join(os.path.dirname(__file__), "..", "zhdk.json")
+    with open(path, encoding="utf-8") as f:
+        tokens = [t["id"] for t in json.load(f) if t["id"].startswith("dk_")]
+
+    for tid in tokens:
+        game = GameState(["A", "B", "C"], seed=11)
+        victim, killer = game.players[0], game.players[1]
+        victim.chipsines = 7
+        victim.hand = ["start_znak", "start_pshik"]
+        victim.discard = ["start_znak", "leg_goose"]
+        killer.hand = ["start_znak"]
+        game._resolve_death_token(victim, tid, killer)
+        _auto_resolve(game)
+        for p in game.players:
+            assert p.life <= p.max_life, f"{tid}: {p.name} выше максимума HP"
+            assert p.chipsines >= 0, f"{tid}: отрицательные чипсины"
+
+
+def test_prize_gives_victory_points():
+    """Главный приз даёт +5 ПО, жетон dk_8 этот бонус снимает."""
+    game = GameState(["A", "B"], seed=1)
+    holder, other = game.players
+    holder.controls_prize = True
+    game._finish_game()
+    assert game.final_scores[holder.id]["vp"] - game.final_scores[other.id]["vp"] == 5
+
+    game2 = GameState(["A", "B"], seed=1)
+    h2, o2 = game2.players
+    h2.controls_prize = True
+    h2.death_tokens = ["dk_8"]
+    game2._finish_game()
+    # приза нет, зато есть штраф жетона
+    assert game2.final_scores[h2.id]["vp"] < game2.final_scores[o2.id]["vp"]
+
+
+def test_final_scores_reach_frontend():
+    """Итоговый счёт попадает в состояние для клиента и отсортирован."""
+    game = GameState(["A", "B", "C"], seed=2)
+    assert game.to_public_dict("A")["final_scores"] is None, "до конца игры счёта быть не должно"
+
+    game.players[0].zone_in_play.append("leg_goose")
+    game._finish_game()
+    rows = game.to_public_dict(game.players[0].id)["final_scores"]
+    assert rows and len(rows) == 3
+    assert [r["vp"] for r in rows] == sorted((r["vp"] for r in rows), reverse=True), "не отсортировано"
+    assert rows[0]["id"] == game.winner, "первым должен идти победитель"
+    for r in rows:
+        assert {"id", "name", "vp", "legends", "death_tokens"} <= set(r)

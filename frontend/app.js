@@ -2,8 +2,75 @@ let ws=null,myId=null,roomId=null,lastState=null,lastVisualSequence=0,lastToastS
 const $=(id)=>document.getElementById(id);
 const SFX={click:'assets/audio/click.ogg',card:'assets/audio/card-play.ogg',drawer:'assets/audio/drawer.ogg',turn:'assets/audio/turn.ogg',error:'assets/audio/error.ogg'};const soundPool=Object.fromEntries(Object.entries(SFX).map(([name,url])=>{const audio=new Audio(url);audio.preload='auto';audio.volume=name==='turn'?.075:.055;return [name,audio]}));let soundOn=localStorage.getItem('krutagidon_sound')!=='off';function softTurnChime(){try{const Ctx=window.AudioContext||window.webkitAudioContext;const ctx=new Ctx();const gain=ctx.createGain();gain.gain.setValueAtTime(.0001,ctx.currentTime);gain.gain.exponentialRampToValueAtTime(.035,ctx.currentTime+.04);gain.gain.exponentialRampToValueAtTime(.0001,ctx.currentTime+.65);gain.connect(ctx.destination);[174.6,220].forEach((freq,index)=>{const osc=ctx.createOscillator();osc.type='sine';osc.frequency.setValueAtTime(freq,ctx.currentTime+index*.05);osc.connect(gain);osc.start(ctx.currentTime+index*.05);osc.stop(ctx.currentTime+.7)});setTimeout(()=>ctx.close(),800)}catch(e){}}function paperCardSound(){try{const Ctx=window.AudioContext||window.webkitAudioContext;const ctx=new Ctx();const length=Math.floor(ctx.sampleRate*.16);const buffer=ctx.createBuffer(1,length,ctx.sampleRate);const data=buffer.getChannelData(0);for(let i=0;i<length;i++)data[i]=(Math.random()*2-1)*(1-i/length);const source=ctx.createBufferSource();source.buffer=buffer;const filter=ctx.createBiquadFilter();filter.type='bandpass';filter.frequency.value=850;filter.Q.value=.7;const gain=ctx.createGain();gain.gain.setValueAtTime(.0001,ctx.currentTime);gain.gain.exponentialRampToValueAtTime(.045,ctx.currentTime+.012);gain.gain.exponentialRampToValueAtTime(.0001,ctx.currentTime+.17);source.connect(filter);filter.connect(gain);gain.connect(ctx.destination);source.start();setTimeout(()=>ctx.close(),250)}catch(e){}}function playSound(name){if(!soundOn)return;if(name==='turn'){softTurnChime();return}if(name==='card'){paperCardSound();return}const base=soundPool[name];if(!base)return;const audio=base.cloneNode();audio.volume=base.volume;try{const pr=audio.play();if(pr&&typeof pr.catch==='function')pr.catch(()=>{})}catch(e){}}
 function wsUrl(room){return `${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws/${encodeURIComponent(room)}`}
-$("join-btn").onclick=()=>{const name=$("name-input").value.trim()||'Колдун';roomId=$("room-input").value.trim()||'default';const saved=localStorage.getItem('krutagidon_pid_'+roomId);$("join-btn").disabled=true;$("join-btn").textContent='Подключаемся…';ws=new WebSocket(wsUrl(roomId));ws.onopen=()=>ws.send(JSON.stringify({name,avatar:chosenAvatar,player_id:saved||undefined}));ws.onmessage=e=>handleMessage(JSON.parse(e.data));ws.onclose=()=>{$("join-btn").disabled=false;$("join-btn").textContent='Войти в Крутагидон'}};
-function handleMessage(msg){if(msg.type==='joined'){myId=msg.player_id;localStorage.setItem('krutagidon_pid_'+roomId,myId);$('lobby-room-code').textContent=roomId;$('room-code-game').textContent=roomId;show('lobby-screen')}else if(msg.type==='lobby'){renderLobby(msg);if(msg.started)show('game-screen')}else if(msg.type==='state'){const motion=captureVisualMotion(msg.state.visual_event);lastState=msg.state;show('game-screen');render(msg.state);prepareVisualMotion(motion);requestAnimationFrame(()=>playVisualMotion(motion,msg.state.visual_event))}else if(msg.type==='error'){playSound('error');alert(msg.message)}}
+/* ---------- Комната берётся из ссылки: делиться = скинуть URL ---------- */
+function roomFromUrl(){
+  const p=new URLSearchParams(location.search).get('room');
+  if(p)return p.trim().slice(0,32);
+  const h=location.hash.replace(/^#\/?/,'').trim();
+  return h?h.slice(0,32):'';
+}
+function makeRoomCode(){
+  const words=['kotel','zhaba','griby','chipsy','vopli','loshara','magiya','vihr','peklo','sopli'];
+  return words[Math.floor(Math.random()*words.length)]+'-'+Math.floor(1000+Math.random()*9000);
+}
+function inviteUrl(room){return `${location.origin}${location.pathname}?room=${encodeURIComponent(room)}`}
+function setupInvite(){
+  roomId=roomFromUrl();
+  const fresh=!roomId;
+  if(fresh){roomId=makeRoomCode();history.replaceState(null,'',inviteUrl(roomId))}
+  $('room-input').value=roomId;
+  const link=inviteUrl(roomId);
+  const box=$('room-invite'); if(box)box.classList.remove('hidden');
+  const f=$('invite-link'); if(f)f.value=link;
+  const l=$('lobby-link'); if(l)l.value=link;
+  $('join-btn').textContent=fresh?'Создать игру':'Присоединиться';
+  // Имя запоминаем: второй раз вводить не надо.
+  const savedName=localStorage.getItem('krutagidon_name');
+  if(savedName&&!$('name-input').value)$('name-input').value=savedName;
+}
+function copyLink(input,btn){
+  if(!input)return;
+  input.select();
+  const done=()=>{const t=btn.textContent;btn.textContent='Скопировано ✓';setTimeout(()=>btn.textContent=t,1500)};
+  if(navigator.clipboard?.writeText)navigator.clipboard.writeText(input.value).then(done).catch(()=>{try{document.execCommand('copy');done()}catch(e){}});
+  else{try{document.execCommand('copy');done()}catch(e){}}
+}
+/* ---------- Подключение с авто-восстановлением ---------- */
+let reconnectTimer=null,reconnectTries=0,wantConnection=false;
+function connect(name){
+  const saved=localStorage.getItem('krutagidon_pid_'+roomId);
+  ws=new WebSocket(wsUrl(roomId));
+  ws.onopen=()=>{
+    reconnectTries=0;setLinkState(true);
+    ws.send(JSON.stringify({name,avatar:chosenAvatar,player_id:saved||undefined}));
+  };
+  ws.onmessage=e=>handleMessage(JSON.parse(e.data));
+  ws.onclose=()=>{
+    setLinkState(false);
+    if(!wantConnection){$('join-btn').disabled=false;$('join-btn').textContent='Играть';return}
+    // Связь оборвалась — молча пробуем вернуться, партия ждёт на паузе.
+    reconnectTries++;
+    const delay=Math.min(1000*reconnectTries,5000);
+    clearTimeout(reconnectTimer);
+    reconnectTimer=setTimeout(()=>connect(name),delay);
+  };
+}
+function setLinkState(online){
+  const b=document.getElementById('link-state');
+  if(!b)return;
+  b.textContent=online?'':'нет связи — восстанавливаем…';
+  b.classList.toggle('hidden',online);
+}
+$("join-btn").onclick=()=>{
+  const name=$("name-input").value.trim()||'Колдун';
+  localStorage.setItem('krutagidon_name',name);
+  if(!roomId)setupInvite();
+  wantConnection=true;
+  $("join-btn").disabled=true;$("join-btn").textContent='Подключаемся…';
+  connect(name);
+};
+$("name-input")?.addEventListener('keydown',e=>{if(e.key==='Enter')$('join-btn').click()});
+function handleMessage(msg){if(msg.type==='joined'){myId=msg.player_id;localStorage.setItem('krutagidon_pid_'+roomId,myId);$('lobby-room-code').textContent=roomId;$('room-code-game').textContent=roomId;const l=$('lobby-link');if(l)l.value=inviteUrl(roomId);if(!msg.returning)show('lobby-screen')}else if(msg.type==='lobby'){renderLobby(msg);if(msg.started)show('game-screen')}else if(msg.type==='state'){const motion=captureVisualMotion(msg.state.visual_event);lastState=msg.state;show('game-screen');render(msg.state);prepareVisualMotion(motion);requestAnimationFrame(()=>playVisualMotion(motion,msg.state.visual_event))}else if(msg.type==='error'){playSound('error');alert(msg.message)}}
 function show(id){['join-screen','lobby-screen','game-screen'].forEach(s=>$(s).classList.toggle('hidden',s!==id))}
 function renderLobby(msg){$('lobby-players').innerHTML=msg.players.map(p=>`<li>${escapeHtml(p.name)}${p.id===msg.host_id?' · хост':''} <span class="${p.ready?'ready':''}">${p.ready?'✓ готов':'выбирает свойство / фамильяра'}</span></li>`).join('');const hasProperty=Boolean(msg.selected_property_id);$('familiar-picker').classList.toggle('hidden',!hasProperty);if(hasProperty){const selected=msg.selected_familiar_ids||[];$('familiar-choice-title').textContent=msg.familiar_required===3?`Выбери фамильяров: ${selected.length}/3`:`Выбери одного фамильяра: ${selected.length}/1`;$('familiar-options').replaceChildren(...msg.familiar_choices.map(board=>familiarButton(board,selected)))}$('property-options').replaceChildren(...msg.property_choices.map(p=>propertyButton(p,msg.selected_property_id)));$('start-btn').disabled=msg.players.some(p=>!p.ready);$('host-settings').classList.toggle('hidden',!msg.is_host);$('add-bot-btn').classList.toggle('hidden',!msg.is_host);if(msg.is_host){$('zhdk-mode').value=msg.settings?.zhdk_mode||'standard';$('zhdk-custom').classList.toggle('hidden',$('zhdk-mode').value!=='custom');if(msg.settings?.zhdk_count)$('zhdk-custom').value=msg.settings.zhdk_count}}
 function boardToCard(board){return {id:board.familiar_id||board.id,name:board.familiar_name,type:board.type||'Фамильяр',cost:board.cost||0,power:board.power||0,vp:board.vp||0,text:board.familiar_text||''}}
@@ -110,7 +177,7 @@ function playVisualMotion(motion,event){
   }
 }
 /* ---------- Счётчики стопок и диагностика (v43) ---------- */
-const BUILD_TAG='v48';
+const BUILD_TAG='v52';
 function setPileCounts(me){
   const d=$('self-deck-count'),c=$('self-discard-count');
   if(d)d.textContent=(me&&Number.isFinite(me.deck_count))?me.deck_count:0;
@@ -142,6 +209,15 @@ function stampBuild(){
   s.textContent='build '+BUILD_TAG;
 }
 document.addEventListener('DOMContentLoaded',stampBuild);
+document.addEventListener('DOMContentLoaded',()=>{
+  setupInvite();
+  $('copy-link')?.addEventListener('click',()=>copyLink($('invite-link'),$('copy-link')));
+  $('lobby-copy')?.addEventListener('click',()=>copyLink($('lobby-link'),$('lobby-copy')));
+  const send=()=>{if(ws&&ws.readyState===1){playSound('click');ws.send(JSON.stringify({action:'toggle_pause'}))}};
+  $('pause-btn')?.addEventListener('click',send);
+  $('pause-resume')?.addEventListener('click',send);
+});
+document.addEventListener('DOMContentLoaded',()=>{const b=$('gameover-close');if(b)b.onclick=()=>$('gameover-modal').classList.add('hidden')});
 document.addEventListener('DOMContentLoaded',()=>bindPreview($('buy-wild-btn'),()=>WILD_CARD));
 if(document.readyState!=='loading')bindPreview($('buy-wild-btn'),()=>WILD_CARD);
 if(document.readyState!=='loading')stampBuild();
@@ -172,6 +248,37 @@ function bindPreview(el,getCard){
   zoom.onclick=(e)=>{e.preventDefault();e.stopPropagation();const card=getCard();if(card)showCard(card)};
   el.appendChild(zoom);
 }
+/* Экран итогов вместо alert — v51 */
+function showGameOver(state){
+  const rows=state.final_scores||[];
+  const win=state.players.find(p=>p.id===state.winner);
+  $('gameover-winner').textContent=win?`Победитель: ${win.name}`:'Игра окончена';
+  $('gameover-table').innerHTML=rows.length?rows.map((r,i)=>`
+    <div class="score-row${r.id===state.winner?' is-winner':''}">
+      <span class="score-place">${i+1}</span>
+      <span class="score-ava">${escapeHtml(r.avatar||'')}</span>
+      <span class="score-name">${escapeHtml(r.name)}${r.id===myId?' · Ты':''}${r.is_loshara?' · лошара':''}${r.controls_prize?' · приз':''}</span>
+      <span class="score-sub">легенд ${r.legends} · ЖДК ${r.death_tokens}</span>
+      <span class="score-vp">${r.vp} ПО</span>
+    </div>`).join(''):'<div class="score-row">Счёт недоступен</div>';
+  $('gameover-modal').classList.remove('hidden');
+}
+/* ---------- Пауза: партия ждёт, никто ничего не теряет ---------- */
+function renderPause(state){
+  const info=state.pause||{};
+  const overlay=$('pause-overlay');
+  if(!overlay)return;
+  overlay.classList.toggle('hidden',!info.paused);
+  if(info.paused){
+    const manual=info.kind==='manual';
+    $('pause-title').textContent=manual?'Перерыв':'Ждём игрока';
+    $('pause-reason').textContent=info.reason||'';
+    // Снять можно только ручную паузу: отключившегося надо дождаться.
+    $('pause-resume').classList.toggle('hidden',!manual);
+  }
+  const btn=$('pause-btn');
+  if(btn){btn.textContent=info.paused?'▶':'⏸';btn.title=info.paused?'Продолжить игру':'Перерыв — поставить игру на паузу';}
+}
 function escapeHtml(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function cardEl(card,onClick){const el=document.createElement('article');el.className='card'+(onClick?' is-actionable':'');el.dataset.cardId=card.id;el.title=`${card.name}\n${card.text||''}`;const img=document.createElement('img');img.className='cart-img';img.alt=card.name;img.loading='lazy';img.onload=()=>el.classList.add('has-image');attachCardImage(img,card.id,()=>{img.remove();el.classList.remove('has-image')});const info=document.createElement('div');info.className='card-info';info.innerHTML=`<div class="cname">${escapeHtml(card.name)}</div><div class="ctext">${escapeHtml((card.text||'').slice(0,128))}</div><div class="cfooter"><span class="cost">◉ ${card.cost}</span><span class="power">⚡ +${card.power}</span></div>`;el._cardData=card;const zoom=document.createElement('button');zoom.className='card-zoom';zoom.type='button';zoom.textContent='⌕';zoom.title='Открыть карту';zoom.onclick=(event)=>{event.stopPropagation();showCard(card)};el.append(img,info,zoom);if(onClick)el.onclick=onClick;return el}
 function playerEl(p,isMe,isTurn,seat){
@@ -196,9 +303,31 @@ function playerEl(p,isMe,isTurn,seat){
   if(p.familiar)el.querySelector('.familiar-card').onclick=(event)=>{event.stopPropagation();showCard(p.familiar)};
   return el;
 }
-function render(state){const me=state.players.find(p=>p.id===myId),active=state.players.find(p=>p.id===state.turn_player_id),myTurn=state.turn_player_id===myId;/* СЧЁТЧИКИ КОЛОДЫ/СБРОСА — В САМОМ НАЧАЛЕ. Никакая ошибка ниже не должна их обнулять. */setPileCounts(me);try{if(lastTurnPlayer&&lastTurnPlayer!==state.turn_player_id)playSound('turn');lastTurnPlayer=state.turn_player_id;renderVisualEvent(state.visual_event);renderEvent(state.pending_event);renderDecision(state.pending_decision);$('turn-banner').textContent=active?(myTurn?'Твой ход — наводи Крутагидон':`Ходит ${active.name}`):'Подготовка';$('log-panel').innerHTML=state.logs.map(l=>`<div>${escapeHtml(l)}</div>`).join('');$('log-panel').scrollTop=$('log-panel').scrollHeight;const seatedPlayers=[...(me?[me]:[]),...state.players.filter(p=>p.id!==myId)];const seatLayouts={1:[0],2:[0,1],3:[0,2,3],4:[0,4,1,5],5:[0,4,2,3,5]};const seats=seatLayouts[seatedPlayers.length]||seatLayouts[5];$('opponents').replaceChildren(...seatedPlayers.map((p,index)=>playerEl(p,p.id===myId,p.id===state.turn_player_id,seats[index])));$('played-cards').replaceChildren(...(active?.played_this_turn||[]).map(c=>cardEl(c,null)));$('main-deck-count').textContent=state.main_deck_count;$('legend-deck-count').textContent=state.legend_deck_count;$('vyal-count').textContent=state.vyal_remaining;$('zhdk-count').textContent=state.undead_stack_count;$('chips-bank-count').textContent=state.chips_bank;$('market').replaceChildren(...state.market.map(c=>cardEl(c,()=>myTurn&&buyCard(c.id))));$('legend-market').replaceChildren(...state.legend_market.map(c=>cardEl(c,()=>myTurn&&buyCard(c.id))));$('buy-wild-btn').disabled=!myTurn;$('buy-familiar-btn').disabled=!myTurn||!me||me.familiar_bought;const famBtn=$('buy-familiar-btn');if(me?.familiar){famBtn.innerHTML='<img class="buy-fam-thumb" alt="">';famBtn.title=`Купить фамильяра: ${me.familiar.name} · 6`;attachCardImage(famBtn.querySelector('img'),me.familiar.id);bindPreview(famBtn,()=>me.familiar)}else{famBtn.innerHTML='';famBtn.title='Купить фамильяра · 6'};$('hand').replaceChildren(...(me?.hand||[]).map(c=>cardEl(c,()=>myTurn&&playCard(c))));$('permanents').replaceChildren(...(me?.zone_in_play||[]).map(c=>cardEl(c,c.activation?()=>activatePermanent(c):null)));$('attack-actions').replaceChildren(...(me?.available_attacks||[]).map(c=>deferredAttackButton(c,myTurn)));$('self-panel').classList.toggle('self-loshara',Boolean(me?.is_loshara));$('self-stats').innerHTML=me?`<div class="self-name">${escapeHtml(me.name)}${me.is_loshara?' · ЛОШАРА':''}${myTurn?' · ТВОЙ ХОД':''}</div><div class="self-meta"><span class="stat-chip health">♥ ${me.life}/${me.max_life} HP</span><span class="stat-chip power">⚡ ${me.power_available} мощи</span></div>`:'';if(me?.discard_top){$('self-discard-card').src=`https://raw.githubusercontent.com/SpongeGamer/krutagidoniwe/main/frontend/assets/cards/${encodeURIComponent(me.discard_top.id)}.webp`}else{$('self-discard-card').src='assets/cards/card_closed.webp'}$('prize-supply').classList.toggle('hidden',state.players.some(p=>p.controls_prize));$('end-turn-btn').disabled=!myTurn;if(state.game_over&&!announcedGameOver){announcedGameOver=true;alert('Игра окончена! Победитель: '+(state.players.find(p=>p.id===state.winner)?.name||'?'))}}catch(err){showRenderError(err)}}
+function render(state){const me=state.players.find(p=>p.id===myId),active=state.players.find(p=>p.id===state.turn_player_id),myTurn=state.turn_player_id===myId;/* СЧЁТЧИКИ КОЛОДЫ/СБРОСА — В САМОМ НАЧАЛЕ. Никакая ошибка ниже не должна их обнулять. */setPileCounts(me);try{if(lastTurnPlayer&&lastTurnPlayer!==state.turn_player_id)playSound('turn');lastTurnPlayer=state.turn_player_id;renderVisualEvent(state.visual_event);renderEvent(state.pending_event);renderDecision(state.pending_decision);$('turn-banner').textContent=active?(myTurn?'Твой ход — наводи Крутагидон':`Ходит ${active.name}`):'Подготовка';$('log-panel').innerHTML=state.logs.map(l=>`<div>${escapeHtml(l)}</div>`).join('');$('log-panel').scrollTop=$('log-panel').scrollHeight;const seatedPlayers=[...(me?[me]:[]),...state.players.filter(p=>p.id!==myId)];const seatLayouts={1:[0],2:[0,1],3:[0,2,3],4:[0,4,1,5],5:[0,4,2,3,5]};const seats=seatLayouts[seatedPlayers.length]||seatLayouts[5];$('opponents').replaceChildren(...seatedPlayers.map((p,index)=>playerEl(p,p.id===myId,p.id===state.turn_player_id,seats[index])));$('played-cards').replaceChildren(...(active?.played_this_turn||[]).map(c=>cardEl(c,null)));$('main-deck-count').textContent=state.main_deck_count;$('legend-deck-count').textContent=state.legend_deck_count;$('vyal-count').textContent=state.vyal_remaining;$('zhdk-count').textContent=state.undead_stack_count;$('chips-bank-count').textContent=state.chips_bank;$('market').replaceChildren(...state.market.map(c=>cardEl(c,()=>myTurn&&buyCard(c.id))));$('legend-market').replaceChildren(...state.legend_market.map(c=>cardEl(c,()=>myTurn&&buyCard(c.id))));$('buy-wild-btn').disabled=!myTurn;const famBtn=$('buy-familiar-btn');famBtn.disabled=!myTurn||!me||me.familiar_bought;
+/* Фамильяр куплен — карточка уходит совсем, Шальная магия занимает её место. */
+famBtn.classList.toggle('hidden',Boolean(me?.familiar_bought)||!me?.familiar);
+if(me?.familiar&&!me.familiar_bought){famBtn.innerHTML='<img class="buy-fam-thumb" alt="">';famBtn.title=`Купить фамильяра: ${me.familiar.name} · 6`;attachCardImage(famBtn.querySelector('img'),me.familiar.id);bindPreview(famBtn,()=>me.familiar)}else{famBtn.innerHTML=''};$('hand').replaceChildren(...(me?.hand||[]).map(c=>cardEl(c,()=>myTurn&&playCard(c))));$('permanents').replaceChildren(...(me?.zone_in_play||[]).map(c=>cardEl(c,c.activation?()=>activatePermanent(c):null)));$('attack-actions').replaceChildren(...(me?.available_attacks||[]).map(c=>deferredAttackButton(c,myTurn)));$('self-panel').classList.toggle('self-loshara',Boolean(me?.is_loshara));$('self-stats').innerHTML=me?`<div class="self-name">${escapeHtml(me.name)}${me.is_loshara?' · ЛОШАРА':''}${myTurn?' · ТВОЙ ХОД':''}</div><div class="self-meta"><span class="stat-chip health">♥ ${me.life}/${me.max_life} HP</span><span class="stat-chip power">⚡ ${me.power_available} мощи</span></div>`:'';if(me?.discard_top){$('self-discard-card').src=`https://raw.githubusercontent.com/SpongeGamer/krutagidoniwe/main/frontend/assets/cards/${encodeURIComponent(me.discard_top.id)}.webp`}else{$('self-discard-card').src='assets/cards/card_closed.webp'}$('prize-supply').classList.toggle('hidden',state.players.some(p=>p.controls_prize));renderPause(state);$('end-turn-btn').disabled=!myTurn||Boolean(state.pause?.paused);if(state.game_over&&!announcedGameOver){announcedGameOver=true;showGameOver(state)}}catch(err){showRenderError(err)}}
 function renderVisualEvent(event){const toast=$('activity-toast');if(!event||!event.seq)return;if(event.seq===lastToastSequence)return;lastToastSequence=event.seq;const card=event.cards?.[0];const verb=event.type==='buy'?'покупает':event.type==='play'?'разыгрывает':event.type==='turn'?'получает ход':'заканчивает ход';toast.innerHTML=`<b>${escapeHtml(event.player)}</b> ${verb}${card?`: <span>${escapeHtml(card.name)}</span>`:''}`;toast.classList.remove('hidden');clearTimeout(toastTimer);toastTimer=setTimeout(()=>toast.classList.add('hidden'),1500)}
-function renderEvent(event){const modal=$('event-modal');if(!event){modal.classList.add('hidden');return}$('event-type').textContent=event.type||'СОБЫТИЕ';$('event-name').textContent=event.name||'Событие';$('event-text').textContent=event.text||'';modal.classList.remove('hidden')}
+function renderEvent(event){
+  const modal=$('event-modal');
+  if(!event){modal.classList.add('hidden');return}
+  const isToken=(event.type||'').includes('дохлого колдуна');
+  $('event-type').textContent=isToken?'ЖЕТОН ДОХЛОГО КОЛДУНА':(event.type||'СОБЫТИЕ');
+  $('event-name').textContent=event.name||'Событие';
+  $('event-text').textContent=event.text||'';
+  // Картинка жетона: показываем, ЧТО именно выпало, а не только имя строкой.
+  const art=$('event-art');
+  if(isToken&&event.id){
+    art.classList.remove('hidden');
+    art.innerHTML='<img alt="">';
+    attachCardImage(art.querySelector('img'),event.id,()=>{art.classList.add('hidden')});
+  }else{art.classList.add('hidden');art.innerHTML=''}
+  const who=$('event-owner');
+  if(isToken&&event.owner){who.classList.remove('hidden');who.textContent=(event.owner_id===myId?'Ты получаешь':`${event.owner} получает`)+' этот жетон'}
+  else who.classList.add('hidden');
+  $('event-continue').textContent=isToken?'Понятно →':'Показать эффект →';
+  modal.classList.remove('hidden');
+}
 function renderDecision(decision){const modal=$('decision-modal');if(!decision||decision.waiting_for){modal.classList.add('hidden');return}$('decision-title').textContent=decision.title||'Выбери вариант';$('decision-text').textContent=decision.text||'';$('decision-revealed').replaceChildren(...(decision.revealed_cards||[]).map(card=>cardEl(card,null)));$('decision-options').replaceChildren(...(decision.options||[]).map(option=>{const button=document.createElement('button');button.className='target-button';button.innerHTML=`<b>${escapeHtml(option.label)}</b>${option.detail?`<small>${escapeHtml(option.detail)}</small>`:''}`;button.onclick=()=>{playSound('click');ws.send(JSON.stringify({action:'resolve_decision',option_id:option.id}))};return button}));modal.classList.remove('hidden')}
 function buyCard(cardId){playSound('click');ws.send(JSON.stringify({action:'buy_card',card_id:cardId}))}
 function playCard(card){if(card.id==='spec_wild'){$('wild-modal').classList.remove('hidden');return}if(card.has_attack){pendingAttackChoice=card;$('attack-card-name').textContent=card.name;$('attack-modal').classList.remove('hidden');return}sendPlay(card,{})}

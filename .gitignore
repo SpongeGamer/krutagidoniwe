@@ -9,3 +9,10 @@ tests/e2e_*.js
 .pytest_cache/
 package.json
 package-lock.json
+cloudflared
+cloudflared.exe
+cloudflared.part
+clo
+clo.exe
+cloudpub_token.txt
+launcher.log

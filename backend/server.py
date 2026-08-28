@@ -70,6 +70,25 @@ class Room:
         self.started = False
         self.host_id: Optional[str] = None
         self.settings = {"zhdk_mode": "standard", "zhdk_count": None}
+        # Пауза: партия замирает, пока кто-то отвалился или все решили отдохнуть.
+        self.offline: set[str] = set()
+        self.manual_pause = False
+
+    @property
+    def paused(self) -> bool:
+        return bool(self.manual_pause or self.offline)
+
+    def pause_info(self) -> dict:
+        names = [self.player_names.get(pid, "Колдун") for pid in sorted(self.offline)]
+        if names:
+            reason = ("Ждём: " + ", ".join(names)) if len(names) > 1 else f"Ждём: {names[0]}"
+            kind = "offline"
+        elif self.manual_pause:
+            reason = "Перерыв — все отдыхают"
+            kind = "manual"
+        else:
+            return {"paused": False}
+        return {"paused": True, "reason": reason, "kind": kind, "waiting_for": names}
 
     def ensure_property_offer(self, player_id: str):
         """Две карты свойств резервируются за игроком и не повторяются у других."""
@@ -123,6 +142,10 @@ class Room:
             self.selected_familiars[bot_id] = selected
         return bot_id
 
+    def log_line(self, text: str):
+        if self.game:
+            self.game.log(text)
+
     def is_bot(self, player_id: Optional[str]) -> bool:
         return bool(player_id and player_id in self.bot_ids)
 
@@ -155,6 +178,8 @@ class Room:
         safety = 0
         announced_bot_id: Optional[str] = None
         while safety < 200 and not self.game.game_over:
+            if self.paused:      # на паузе боты тоже замирают
+                break
             safety += 1
             game = self.game
             if game.pending_event:
@@ -213,9 +238,14 @@ class Room:
     async def broadcast(self):
         if not self.game:
             return
+        pause = self.pause_info()
         for pid, ws in list(self.connections.items()):
             try:
-                await ws.send_json({"type": "state", "state": self.game.to_public_dict(viewer_id=pid)})
+                state = self.game.to_public_dict(viewer_id=pid)
+                state["pause"] = pause
+                state["offline_ids"] = sorted(self.offline)
+                state["is_host"] = (pid == self.host_id)
+                await ws.send_json({"type": "state", "state": state})
             except Exception:
                 pass
 
@@ -263,23 +293,72 @@ async def ws_endpoint(websocket: WebSocket, room_id: str):
         join_msg = await websocket.receive_json()
         name = (join_msg.get("name") or "Колдун").strip()[:40]
         avatar = (join_msg.get("avatar") or "🧙")[:4]
-        player_id = join_msg.get("player_id") or str(uuid.uuid4())[:8]
+        saved_id = join_msg.get("player_id")
+
+        # Возвращение в идущую партию: узнаём игрока по сохранённому id.
+        returning = bool(saved_id and saved_id in room.player_names)
+        if returning:
+            player_id = saved_id
+            room.offline.discard(player_id)
+            # Имя/аватар не перетираем: игрок уже сидит за столом под ними.
+            room.log_line(f"{room.player_names[player_id]} вернулся в игру")
+        else:
+            if room.started:
+                # Партия уже идёт — новых за стол не сажаем, только зрителем.
+                await websocket.send_json({
+                    "type": "error",
+                    "message": "Партия уже началась. Попроси хозяина комнаты начать новую.",
+                })
+                await websocket.close()
+                return
+            player_id = saved_id or str(uuid.uuid4())[:8]
+            room.player_names[player_id] = name
+            room.player_avatars[player_id] = avatar
+            room.ensure_property_offer(player_id)
+
         room.connections[player_id] = websocket
-        room.player_names[player_id] = name
-        if room.host_id is None:
+        if room.host_id is None or room.host_id not in room.player_names:
             room.host_id = player_id
-        room.player_avatars[player_id] = avatar
-        room.ensure_property_offer(player_id)
-        await websocket.send_json({"type": "joined", "player_id": player_id})
+        await websocket.send_json({
+            "type": "joined",
+            "player_id": player_id,
+            "room_id": room.id,
+            "returning": returning,
+        })
 
         if room.started and room.game:
-            await websocket.send_json({"type": "state", "state": room.game.to_public_dict(viewer_id=player_id)})
+            await room.broadcast()
+            if not room.paused:
+                await room.run_bots()
+                await room.broadcast()
         else:
             await room.broadcast_lobby()
 
         while True:
             msg = await websocket.receive_json()
             action = msg.get("action")
+
+            # --- Пауза: доступна всем, останавливает партию для отдыха ---
+            if action == "toggle_pause":
+                if room.offline:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Партия и так на паузе: ждём отключившихся",
+                    })
+                else:
+                    room.manual_pause = not room.manual_pause
+                    who = room.player_names.get(player_id, "Колдун")
+                    room.log_line(f"{who} {'поставил партию на паузу' if room.manual_pause else 'снял паузу'}")
+                    await room.broadcast()
+                continue
+
+            # Пока стоит пауза, игровые действия не проходят.
+            if room.started and room.paused and action not in {"toggle_pause"}:
+                await websocket.send_json({
+                    "type": "error",
+                    "message": room.pause_info().get("reason", "Партия на паузе"),
+                })
+                continue
 
             if action == "add_bot" and not room.started:
                 if player_id != room.host_id:
@@ -431,6 +510,23 @@ async def ws_endpoint(websocket: WebSocket, room_id: str):
     except WebSocketDisconnect:
         if player_id and player_id in room.connections:
             del room.connections[player_id]
+        # Игрок пропал — ставим партию на паузу и ждём его возвращения.
+        if player_id and room.started and player_id in room.player_names and not room.is_bot(player_id):
+            room.offline.add(player_id)
+            room.log_line(f"{room.player_names[player_id]} отключился — партия на паузе")
+            await room.broadcast()
+        elif player_id and not room.started:
+            # До старта просто убираем из лобби, чтобы не висел «призрак».
+            room.player_names.pop(player_id, None)
+            room.player_avatars.pop(player_id, None)
+            room.selected_properties.pop(player_id, None)
+            room.selected_familiars.pop(player_id, None)
+            room.property_offers.pop(player_id, None)
+            room.familiar_offers.pop(player_id, None)
+            if room.host_id == player_id:
+                humans = [p for p in room.player_names if not room.is_bot(p)]
+                room.host_id = humans[0] if humans else None
+            await room.broadcast_lobby()
 
 
 class NoCacheStaticFiles(StaticFiles):
