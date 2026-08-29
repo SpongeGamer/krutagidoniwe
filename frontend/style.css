@@ -692,3 +692,27 @@ input { user-select:text; -webkit-user-select:text; }
 
 /* Текст постоянки в окне подтверждения */
 .act-text{margin:8px 0 0;color:#e6d8e6;font-size:12px;line-height:1.45;text-align:left}
+
+/* ============ v64: раскрываемая расшифровка очков ============ */
+.score-row.is-expandable{cursor:pointer}
+.score-row.is-expandable:hover{border-color:#ffd04e88}
+.score-row.is-open{grid-template-columns:26px 28px minmax(0,1fr) auto auto}
+.score-details{
+  grid-column:1 / -1;
+  margin-top:9px;padding-top:9px;
+  border-top:1px solid #ffffff1f;
+  display:grid;gap:4px;
+}
+.detail-line{
+  display:flex;justify-content:space-between;gap:12px;
+  color:#e6d8e6;font-size:11px;line-height:1.35;
+}
+.detail-line b{white-space:nowrap;font-variant-numeric:tabular-nums}
+.detail-line.plus b{color:#9dff87}
+.detail-line.minus b{color:#ff7a8f}
+.detail-line.total{
+  margin-top:4px;padding-top:6px;
+  border-top:1px solid #ffffff1f;
+  color:#ffdd82;font-size:12px;font-weight:900;
+}
+.detail-line.total b{color:#ffd34e}

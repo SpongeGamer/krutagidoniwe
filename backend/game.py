@@ -557,7 +557,9 @@ class GameState:
 
     def resolve_event(self) -> dict:
         if not self.pending_event:
-            return {"error": "Нет события для продолжения"}
+            # Обычно это второй клик по кнопке или запоздавший клик,
+            # когда событие уже закрыл бот. Молча игнорируем.
+            return {"ok": True}
         # Показ жетона ЖДК — просто информационное окно, карты за ним нет.
         if not self._pending_event_card:
             self.pending_event = None
@@ -736,7 +738,10 @@ class GameState:
         player.power_available -= wild_card.cost
         self.wild_magic_remaining -= 1
         self.receive_card(player, wild_card.id)
-        self.log(f"{player.name}: покупает Шальную магию")
+        self.log(f"{player.name}: покупает Шальную магию за {wild_card.cost} мощи "
+                 f"(осталось {player.power_available})")
+        # Без этого покупка выглядела так, будто ничего не произошло.
+        self.emit_visual_event("buy", player, [wild_card.id], "market", "discard")
         return {"ok": True}
 
     def buy_familiar(self, player: Player) -> dict:
@@ -750,7 +755,9 @@ class GameState:
         player.power_available -= card.cost
         player.familiar_bought = True
         self.receive_card(player, card.id)
-        self.log(f"{player.name}: покупает своего фамильяра {card.name}")
+        self.log(f"{player.name}: покупает фамильяра «{card.name}» за {card.cost} мощи "
+                 f"(осталось {player.power_available})")
+        self.emit_visual_event("buy", player, [card.id], "market", "discard")
         return {"ok": True}
 
     def end_turn(self, player: Player) -> dict:

@@ -66,28 +66,100 @@ def _leg_goose(game, player, card, **kw):
 
 @effect("leg_lover")
 def _leg_lover(game, player, card, **kw):
-    """Атака: отдай 1 свой жетон ЖДК выбранному колдуну, он применяет эффект."""
+    """Атака: отдай 1 свой жетон ЖДК выбранному колдуну, он применяет эффект.
+
+    КАКОЙ именно жетон отдать — решает игрок, а не игра.
+    """
     if not kw.get("use_attack", True) or not player.death_tokens:
         return
     target = game.get_player(kw.get("target_id"))
     if not target:
         return
-    token_id = player.death_tokens.pop()
-    target.death_tokens.append(token_id)
-    name = game.zhdk.get(token_id, {}).get("name", token_id)
-    game.log(f"{player.name}: отдаёт жетон «{name}» игроку {target.name}")
-    game._resolve_death_token(target, token_id, player)
+
+    def give(token_id: str):
+        if token_id not in player.death_tokens:
+            return
+        player.death_tokens.remove(token_id)
+        target.death_tokens.append(token_id)
+        name = game.zhdk.get(token_id, {}).get("name", token_id)
+        game.log(f"{player.name}: отдаёт жетон «{name}» игроку {target.name}")
+        game._resolve_death_token(target, token_id, player)
+
+    # Один жетон — выбирать не из чего, отдаём сразу.
+    if len(player.death_tokens) == 1:
+        give(player.death_tokens[0])
+        return
+
+    options = []
+    for tid in player.death_tokens:
+        tok = game.zhdk.get(tid, {})
+        options.append({
+            "id": tid,
+            "label": tok.get("name", tid),
+            "detail": (tok.get("effect_text") or "")[:110],
+        })
+    game.request_decision(
+        player, card.name,
+        f"Какой жетон отдать игроку {target.name}?",
+        options, give,
+    )
 
 
 @effect("leg_mortal")
 def _leg_mortal(game, player, card, **kw):
-    """Атака: убей выбранного врага."""
+    """Атака: убей врага. Возьми 3 жетона ЖДК, ОДИН на выбор отдай ему,
+    остальные два верни в стопку."""
     if not kw.get("use_attack", True):
         return
     target = game.get_player(kw.get("target_id"))
     if not target:
         return
-    game.attack_target(player, card, target.id, max(1, target.life))
+
+    def on_hit(victim, died):
+        if not died:
+            return
+        # Обычный жетон за смерть уже выдан движком — забираем его обратно,
+        # ведь по карте жертва получает жетон ИЗ ТРЁХ на выбор убийцы.
+        if victim.death_tokens:
+            game.undead_token_stack.append(victim.death_tokens.pop())
+
+        drawn = []
+        for _ in range(3):
+            if game.undead_token_stack:
+                drawn.append(game.undead_token_stack.pop())
+        if not drawn:
+            game.log(f"{card.name}: жетоны кончились — отдавать нечего")
+            return
+
+        def choose(token_id: str):
+            for tid in drawn:
+                if tid == token_id:
+                    victim.death_tokens.append(tid)
+                    name = game.zhdk.get(tid, {}).get("name", tid)
+                    game.log(f"{player.name} выбирает жетон «{name}» для {victim.name}")
+                    game._resolve_death_token(victim, tid, player)
+                else:
+                    game.undead_token_stack.append(tid)   # остальные — обратно
+
+        if len(drawn) == 1:
+            choose(drawn[0])
+            return
+
+        options = []
+        for tid in drawn:
+            tok = game.zhdk.get(tid, {})
+            options.append({
+                "id": tid,
+                "label": tok.get("name", tid),
+                "detail": (tok.get("effect_text") or "")[:110],
+            })
+        game.request_decision(
+            player, card.name,
+            f"Выбери жетон для {victim.name} — остальные два вернутся в стопку",
+            options, choose,
+        )
+
+    game.attack_target(player, card, target.id, max(1, target.life), on_hit=on_hit)
 
 
 @effect("leg_captain")

@@ -84,7 +84,7 @@ function familiarButton(board,selected){
   const isPicked=selected.includes(board.id);
   const el=document.createElement('div');
   el.className='familiar-option'+(isPicked?' selected':'');
-  const src=`https://raw.githubusercontent.com/SpongeGamer/krutagidoniwe/main/frontend/assets/cards/${encodeURIComponent(board.id)}.webp`;
+  const src=`assets/cards/${encodeURIComponent(board.id)}.webp`;
   // Только крупная картинка карты — весь текст и так напечатан на самой карте.
   el.innerHTML=`
     <div class="fam-photo"><img src="${src}" alt="${escapeHtml(board.familiar_name)}" loading="lazy"><button class="fam-zoom" type="button" title="Увеличить">⌕</button></div>
@@ -102,7 +102,7 @@ function familiarButton(board,selected){
 /* Подтверждение выбора — чтобы случайный клик не залочил фамильяра.
    Показываем только саму карту крупно: всё описание напечатано на ней. */
 function confirmFamiliar(board){
-  const src=`https://raw.githubusercontent.com/SpongeGamer/krutagidoniwe/main/frontend/assets/cards/${encodeURIComponent(board.id)}.webp`;
+  const src=`assets/cards/${encodeURIComponent(board.id)}.webp`;
   $('confirm-fam-photo').innerHTML=`<img src="${src}" alt="${escapeHtml(board.familiar_name)}">`;
   $('confirm-fam-title').textContent=board.familiar_name;
   $('confirm-fam-wizard').textContent=board.wizard_name;
@@ -114,7 +114,14 @@ function confirmFamiliar(board){
 
 function propertyButton(property,selected){const btn=document.createElement('button');btn.className='property-option'+(selected===property.id?' selected':'');btn.innerHTML=`<b>${escapeHtml(property.name)}</b><small>${escapeHtml(property.effect_text)}</small>`;btn.onclick=()=>ws.send(JSON.stringify({action:'choose_property',property_id:property.id}));return btn}
 const AVATARS=[['🐈‍⬛','Чёрный кот'],['🐕','Верный пёс'],['🦊','Лиса-колдунья'],['🐸','Жабий маг'],['🐉','Маленький дракон'],['🦄','Единорог'],['🦇','Летучая мышь'],['🐺','Лунный волк'],['🦝','Енот-воришка'],['🐙','Осьминог из бездны'],['🦜','Попугай-предсказатель'],['🦎','Ящер-маг'],['🐌','Улитка хаоса'],['🦋','Ночная бабочка'],['👽','Космический колдун'],['🤡','Сальный шут'],['🧙','Старый колдун'],['🧙‍♀️','Ведьма'],['🧛','Вампир'],['🧟','Зомби'],['👹','Демон'],['🧞','Джинн'],['🧚','Фея'],['🧜','Русалка']];let avatarIndex=0;function renderAvatar(direction=1){const avatar=$('avatar-current');avatar.classList.add('swap');setTimeout(()=>{const [icon,name]=AVATARS[avatarIndex];chosenAvatar=icon;avatar.textContent=icon;$('avatar-name').textContent=name;avatar.classList.remove('swap')},120)}$('avatar-prev').onclick=()=>{avatarIndex=(avatarIndex-1+AVATARS.length)%AVATARS.length;renderAvatar(-1)};$('avatar-next').onclick=()=>{avatarIndex=(avatarIndex+1)%AVATARS.length;renderAvatar(1)};
-function sendRoomSettings(){ws.send(JSON.stringify({action:'configure_room',zhdk_mode:$('zhdk-mode').value,zhdk_count:$('zhdk-custom').value}));playSound('click')}$('zhdk-mode').onchange=()=>{$('zhdk-custom').classList.toggle('hidden',$('zhdk-mode').value!=='custom');if($('zhdk-mode').value!=='custom')sendRoomSettings()};$('zhdk-custom').onchange=sendRoomSettings;$('save-room-settings').onclick=sendRoomSettings;$('info-close').onclick=()=>$('info-modal').classList.add('hidden');function showInfo(title,text){$('info-title').textContent=title;$('info-text').textContent=text;$('info-modal').classList.remove('hidden')}$('card-close').onclick=()=>$('card-modal').classList.add('hidden');function showCard(card){$('inspect-type').textContent=card.type||'Карта';$('inspect-name').textContent=card.name;$('inspect-stats').innerHTML=`<b>◉ ${card.cost}</b><b>⚡ +${card.power}</b><b>★ ${card.vp||0} ПО</b>`;$('inspect-text').textContent=card.text||'';const visual=cardEl(card,null);visual.classList.add('inspect-card');$('inspect-card').replaceChildren(visual);$('card-modal').classList.remove('hidden')}$('event-continue').onclick=()=>{playSound('drawer');ws.send(JSON.stringify({action:'resolve_event'}))};$('sound-toggle').textContent=soundOn?'🔊':'🔇';$('sound-toggle').onclick=()=>{soundOn=!soundOn;localStorage.setItem('krutagidon_sound',soundOn?'on':'off');$('sound-toggle').textContent=soundOn?'🔊':'🔇';if(soundOn)playSound('click')};$('add-bot-btn').onclick=()=>{playSound('click');ws.send(JSON.stringify({action:'add_bot'}))};$('start-btn').onclick=()=>{playSound('click');ws.send(JSON.stringify({action:'start_game'}));};$('end-turn-btn').onclick=()=>ws.send(JSON.stringify({action:'end_turn'}));$('buy-wild-btn').onclick=()=>ws.send(JSON.stringify({action:'buy_wild_magic'}));$('buy-familiar-btn').onclick=()=>ws.send(JSON.stringify({action:'buy_familiar'}));$('target-cancel').onclick=closeTargetModal;$('attack-cancel').onclick=()=>$('attack-modal').classList.add('hidden');$('attack-later').onclick=()=>{sendPlay(pendingAttackChoice,{defer_attack:true});$('attack-modal').classList.add('hidden')};$('attack-now').onclick=()=>{const card=pendingAttackChoice;$('attack-modal').classList.add('hidden');playAttackNow(card)};$('wild-cancel').onclick=()=>$('wild-modal').classList.add('hidden');$('wild-power').onclick=()=>{sendPlay({id:'spec_wild'}, {choice:'power'});$('wild-modal').classList.add('hidden')};$('wild-steal').onclick=()=>{wildTargetMode=true;$('wild-modal').classList.add('hidden');openTargetModal({id:'spec_wild',name:'Шальная магия'})};$('log-toggle').onclick=()=>document.querySelector('.event-feed').classList.add('open');$('log-close').onclick=()=>document.querySelector('.event-feed').classList.remove('open');document.querySelectorAll('.drawer-tab').forEach(tab=>tab.onclick=()=>{playSound('drawer');tab.closest('.market-drawer').classList.toggle('open')});document.addEventListener('contextmenu',event=>{const card=event.target.closest?.('.card');if(card?._cardData){event.preventDefault();showCard(card._cardData)}else event.preventDefault()},true);document.addEventListener('dragstart',event=>event.preventDefault(),true);
+function sendRoomSettings(){ws.send(JSON.stringify({action:'configure_room',zhdk_mode:$('zhdk-mode').value,zhdk_count:$('zhdk-custom').value}));playSound('click')}$('zhdk-mode').onchange=()=>{$('zhdk-custom').classList.toggle('hidden',$('zhdk-mode').value!=='custom');if($('zhdk-mode').value!=='custom')sendRoomSettings()};$('zhdk-custom').onchange=sendRoomSettings;$('save-room-settings').onclick=sendRoomSettings;$('info-close').onclick=()=>$('info-modal').classList.add('hidden');function showInfo(title,text){$('info-title').textContent=title;$('info-text').textContent=text;$('info-modal').classList.remove('hidden')}$('card-close').onclick=()=>$('card-modal').classList.add('hidden');function showCard(card){$('inspect-type').textContent=card.type||'Карта';$('inspect-name').textContent=card.name;$('inspect-stats').innerHTML=`<b>◉ ${card.cost}</b><b>⚡ +${card.power}</b><b>★ ${card.vp||0} ПО</b>`;$('inspect-text').textContent=card.text||'';const visual=cardEl(card,null);visual.classList.add('inspect-card');$('inspect-card').replaceChildren(visual);$('card-modal').classList.remove('hidden')}$('event-continue').onclick=()=>{
+  // Гасим кнопку сразу: два клика подряд слали второй resolve_event в пустоту.
+  const btn=$('event-continue');
+  if(btn.disabled)return;
+  btn.disabled=true;
+  playSound('drawer');
+  ws.send(JSON.stringify({action:'resolve_event'}));
+};$('sound-toggle').textContent=soundOn?'🔊':'🔇';$('sound-toggle').onclick=()=>{soundOn=!soundOn;localStorage.setItem('krutagidon_sound',soundOn?'on':'off');$('sound-toggle').textContent=soundOn?'🔊':'🔇';if(soundOn)playSound('click')};$('add-bot-btn').onclick=()=>{playSound('click');ws.send(JSON.stringify({action:'add_bot'}))};$('start-btn').onclick=()=>{playSound('click');ws.send(JSON.stringify({action:'start_game'}));};$('end-turn-btn').onclick=()=>ws.send(JSON.stringify({action:'end_turn'}));$('buy-wild-btn').onclick=()=>ws.send(JSON.stringify({action:'buy_wild_magic'}));$('buy-familiar-btn').onclick=()=>ws.send(JSON.stringify({action:'buy_familiar'}));$('target-cancel').onclick=closeTargetModal;$('attack-cancel').onclick=()=>$('attack-modal').classList.add('hidden');$('attack-later').onclick=()=>{sendPlay(pendingAttackChoice,{defer_attack:true});$('attack-modal').classList.add('hidden')};$('attack-now').onclick=()=>{const card=pendingAttackChoice;$('attack-modal').classList.add('hidden');playAttackNow(card)};$('wild-cancel').onclick=()=>$('wild-modal').classList.add('hidden');$('wild-power').onclick=()=>{sendPlay({id:'spec_wild'}, {choice:'power'});$('wild-modal').classList.add('hidden')};$('wild-steal').onclick=()=>{wildTargetMode=true;$('wild-modal').classList.add('hidden');openTargetModal({id:'spec_wild',name:'Шальная магия'})};$('log-toggle').onclick=()=>document.querySelector('.event-feed').classList.add('open');$('log-close').onclick=()=>document.querySelector('.event-feed').classList.remove('open');document.querySelectorAll('.drawer-tab').forEach(tab=>tab.onclick=()=>{playSound('drawer');tab.closest('.market-drawer').classList.toggle('open')});document.addEventListener('contextmenu',event=>{const card=event.target.closest?.('.card');if(card?._cardData){event.preventDefault();showCard(card._cardData)}else event.preventDefault()},true);document.addEventListener('dragstart',event=>event.preventDefault(),true);
 function elementFor(selector){return document.querySelector(selector)}
 function lastElementFor(selector){const all=document.querySelectorAll(selector);return all.length?all[all.length-1]:null}
 function createBotHandSource(playerId,card){
@@ -147,13 +154,17 @@ function captureVisualMotion(event){
     }else source=createBotHandSource(event.player_id,card);
     target=event.destination==='permanent'?`#permanents .card[data-card-id="${CSS.escape(card.id)}"]`:`#played-cards .card[data-card-id="${CSS.escape(card.id)}"]`;
   }else if(event.type==='buy'){
-    const el=elementFor(`#market .card[data-card-id="${CSS.escape(card.id)}"],#legend-market .card[data-card-id="${CSS.escape(card.id)}"]`);
+    // Карта может лежать в рынке, в зале легенд ИЛИ быть кнопкой сбоку
+    // (Шальная магия, фамильяр) — иначе покупка выглядела бы «ничем».
+    let el=elementFor(`#market .card[data-card-id="${CSS.escape(card.id)}"],#legend-market .card[data-card-id="${CSS.escape(card.id)}"]`);
+    if(!el&&card.id==='spec_wild')el=elementFor('#buy-wild-btn');
+    if(!el)el=elementFor('#buy-familiar-btn');
     if(el)source={from:el.getBoundingClientRect(),clone:el.cloneNode(true)};
-    target=`.opp-card[data-player-id="${CSS.escape(event.player_id)}"] .discard-stat`;
+    target=buyTarget(event.player_id);
   }else if(event.type==='discard'){
     const el=elementFor(`#played-cards .card[data-card-id="${CSS.escape(card.id)}"]`);
     if(el)source={from:el.getBoundingClientRect(),clone:el.cloneNode(true)};
-    target=`.opp-card[data-player-id="${CSS.escape(event.player_id)}"] .discard-stat`;
+    target=buyTarget(event.player_id);
   }
   source=source||fallbackSource(event,card);return source&&target?{kind:event.type,card,from:source.from,target,sourceClone:source.clone}:null;
 }
@@ -183,14 +194,14 @@ function playVisualMotion(motion,event){
   }
 }
 /* ---------- Счётчики стопок и диагностика (v43) ---------- */
-const BUILD_TAG='v62';
+const BUILD_TAG='v64';
 function setPileCounts(me){
   const d=$('self-deck-count'),c=$('self-discard-count');
   if(d)d.textContent=(me&&Number.isFinite(me.deck_count))?me.deck_count:0;
   if(c)c.textContent=(me&&Number.isFinite(me.discard_count))?me.discard_count:0;
   const img=$('self-discard-card');
   if(img){
-    if(me&&me.discard_top)img.src=`https://raw.githubusercontent.com/SpongeGamer/krutagidoniwe/main/frontend/assets/cards/${encodeURIComponent(me.discard_top.id)}.webp`;
+    if(me&&me.discard_top)img.src=`assets/cards/${encodeURIComponent(me.discard_top.id)}.webp`;
     else img.src='assets/cards/card_closed.webp';
   }
 }
@@ -310,9 +321,27 @@ function finishCount(state,rows){
     if(!row)return;
     row.querySelector('.score-place').textContent=i+1;
     row.querySelector('.score-vp').textContent=`${r.vp} ПО`;
-    row.querySelector('.score-sub').textContent=`легенд ${r.legends} · ЖДК ${r.death_tokens}`;
+    row.querySelector('.score-sub').textContent=`легенд ${r.legends} · ЖДК ${r.death_tokens} · нажми ▾`;
     row.querySelector('.score-sub').classList.remove('flash');
     if(r.id===state.winner)row.classList.add('is-winner');
+    // Разворачиваем подробный список: за что именно начислены очки.
+    row.classList.add('is-expandable');
+    if(!row.querySelector('.score-details')){
+      const det=document.createElement('div');
+      det.className='score-details hidden';
+      det.innerHTML=(r.steps||[]).map(st=>`
+        <div class="detail-line ${st.delta>0?'plus':'minus'}">
+          <span>${escapeHtml(st.label)}</span><b>${st.delta>0?'+':''}${st.delta}</b>
+        </div>`).join('')||'<div class="detail-line"><span>Нет начислений</span><b>0</b></div>';
+      det.innerHTML+=`<div class="detail-line total"><span>Итого</span><b>${r.vp} ПО</b></div>`;
+      row.appendChild(det);
+    }
+    row.onclick=()=>{
+      const det=row.querySelector('.score-details');
+      if(!det)return;
+      det.classList.toggle('hidden');
+      row.classList.toggle('is-open',!det.classList.contains('hidden'));
+    };
   });
   setTimeout(()=>{
     $('gameover-winner').textContent=win?`Победитель: ${win.name}`:'Игра окончена';
@@ -355,7 +384,7 @@ function showFamiliars(player,list){
   $('tokens-title').textContent=`Фамильяры: ${escapeHtml(player.name)}`;
   $('tokens-list').innerHTML=list.map((f,i)=>`
     <button class="fam-line" data-i="${i}">
-      <img src="https://raw.githubusercontent.com/SpongeGamer/krutagidoniwe/main/frontend/assets/cards/${encodeURIComponent(f.id)}.webp" alt="">
+      <img src="assets/cards/${encodeURIComponent(f.id)}.webp" alt="">
       <span><b>${escapeHtml(f.name)}</b><small>${escapeHtml((f.text||'').slice(0,150))}</small></span>
     </button>`).join('');
   $('tokens-list').querySelectorAll('.fam-line').forEach(b=>{
@@ -382,6 +411,12 @@ function playBespredelBurst(isMega){
   clearTimeout(playBespredelBurst._t);
   playBespredelBurst._t=setTimeout(()=>{box.classList.add('hidden');box.classList.remove('run')},3600);
 }
+/* Куда летят купленные и сброшенные карты. Раньше целью был .discard-stat,
+   которого в вёрстке нет, — анимация просто не проигрывалась. */
+function buyTarget(playerId){
+  if(playerId===myId&&document.getElementById('self-discard-pile'))return '#self-discard-pile';
+  return `.opp-card[data-player-id="${CSS.escape(playerId)}"] .familiar-card`;
+}
 function escapeHtml(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function cardEl(card,onClick){const el=document.createElement('article');el.className='card'+(onClick?' is-actionable':'');el.dataset.cardId=card.id;el.title=`${card.name}\n${card.text||''}`;const img=document.createElement('img');img.className='cart-img';img.alt=card.name;img.loading='lazy';img.onload=()=>el.classList.add('has-image');attachCardImage(img,card.id,()=>{img.remove();el.classList.remove('has-image')});const info=document.createElement('div');info.className='card-info';info.innerHTML=`<div class="cname">${escapeHtml(card.name)}</div><div class="ctext">${escapeHtml((card.text||'').slice(0,128))}</div><div class="cfooter"><span class="cost">◉ ${card.cost}</span><span class="power">⚡ +${card.power}</span></div>`;el._cardData=card;const zoom=document.createElement('button');zoom.className='card-zoom';zoom.type='button';zoom.textContent='⌕';zoom.title='Открыть карту';zoom.onclick=(event)=>{event.stopPropagation();showCard(card)};el.append(img,info,zoom);if(onClick)el.onclick=onClick;return el}
 function playerEl(p,isMe,isTurn,seat){
@@ -398,11 +433,11 @@ function playerEl(p,isMe,isTurn,seat){
       <div class="avatar-box"><span>${escapeHtml(p.avatar||'🧙')}</span></div>
       <div class="player-main">
         <div class="player-name">${escapeHtml(p.name)}${isMe?' · Ты':''}</div>
-        <div class="main-resources"><span class="main-chips"><img src="https://raw.githubusercontent.com/SpongeGamer/krutagidoniwe/main/frontend/assets/tokens/chips.webp" alt="">${p.chipsines}</span><span class="main-zhdk${p.death_tokens?' has-tokens':''}" title="${p.death_tokens?'Нажми, чтобы посмотреть жетоны':'Жетонов дохлого колдуна нет'}"><img src="assets/tokens/zdk.webp" alt="">${p.death_tokens}</span></div>
+        <div class="main-resources"><span class="main-chips"><img src="assets/tokens/chips.webp" alt="">${p.chipsines}</span><span class="main-zhdk${p.death_tokens?' has-tokens':''}" title="${p.death_tokens?'Нажми, чтобы посмотреть жетоны':'Жетонов дохлого колдуна нет'}"><img src="assets/tokens/zdk.webp" alt="">${p.death_tokens}</span></div>
         <div class="hp-bar" title="${p.life}/${p.max_life} HP"><div class="hp-fill" style="width:${hpPercent}%"></div><span>♥ ${p.life}/${p.max_life} HP</span></div>
         ${p.is_loshara?'<div class="loshara-label">ЛОШАРА · максимум 15 HP</div>':''}
       </div>
-      <button class="familiar-card" title="${famList.length?escapeHtml(famList[0].name):'Фамильяр'}">${famList.length?`<img src="https://raw.githubusercontent.com/SpongeGamer/krutagidoniwe/main/frontend/assets/cards/${encodeURIComponent(famList[0].id)}.webp" alt="${escapeHtml(famList[0].name)}">`:'✦'}${famList.length>1?`<span class="fam-count" title="Всего фамильяров: ${famList.length}">${famList.length}</span>`:''}</button>
+      <button class="familiar-card" title="${famList.length?escapeHtml(famList[0].name):'Фамильяр'}">${famList.length?`<img src="assets/cards/${encodeURIComponent(famList[0].id)}.webp" alt="${escapeHtml(famList[0].name)}">`:'✦'}${famList.length>1?`<span class="fam-count" title="Всего фамильяров: ${famList.length}">${famList.length}</span>`:''}</button>
     </div>
     ${p.property?`<button class="property-plate" title="${escapeHtml(p.property.name)}">Свойство: ${escapeHtml(p.property.name)}</button>`:''}`;
   const famBtnEl=el.querySelector('.familiar-card');
@@ -419,7 +454,7 @@ function playerEl(p,isMe,isTurn,seat){
 function render(state){const me=state.players.find(p=>p.id===myId),active=state.players.find(p=>p.id===state.turn_player_id),myTurn=state.turn_player_id===myId;/* СЧЁТЧИКИ КОЛОДЫ/СБРОСА — В САМОМ НАЧАЛЕ. Никакая ошибка ниже не должна их обнулять. */setPileCounts(me);try{if(lastTurnPlayer&&lastTurnPlayer!==state.turn_player_id)playSound('turn');lastTurnPlayer=state.turn_player_id;renderVisualEvent(state.visual_event);renderEvent(state.pending_event);renderDecision(state.pending_decision);$('turn-banner').textContent=active?(myTurn?'Твой ход — наводи Крутагидон':`Ходит ${active.name}`):'Подготовка';$('log-panel').innerHTML=state.logs.map(l=>`<div>${escapeHtml(l)}</div>`).join('');$('log-panel').scrollTop=$('log-panel').scrollHeight;const seatedPlayers=[...(me?[me]:[]),...state.players.filter(p=>p.id!==myId)];const seatLayouts={1:[0],2:[0,1],3:[0,2,3],4:[0,4,1,5],5:[0,4,2,3,5]};const seats=seatLayouts[seatedPlayers.length]||seatLayouts[5];$('opponents').replaceChildren(...seatedPlayers.map((p,index)=>playerEl(p,p.id===myId,p.id===state.turn_player_id,seats[index])));$('played-cards').replaceChildren(...(active?.played_this_turn||[]).map(c=>cardEl(c,null)));$('main-deck-count').textContent=state.main_deck_count;$('legend-deck-count').textContent=state.legend_deck_count;$('vyal-count').textContent=state.vyal_remaining;$('zhdk-count').textContent=state.undead_stack_count;$('chips-bank-count').textContent=state.chips_bank;$('market').replaceChildren(...state.market.map(c=>cardEl(c,()=>myTurn&&buyCard(c.id))));$('legend-market').replaceChildren(...state.legend_market.map(c=>cardEl(c,()=>myTurn&&buyCard(c.id))));$('buy-wild-btn').disabled=!myTurn;const famBtn=$('buy-familiar-btn');famBtn.disabled=!myTurn||!me||me.familiar_bought;
 /* Фамильяр куплен — карточка уходит совсем, Шальная магия занимает её место. */
 famBtn.classList.toggle('hidden',Boolean(me?.familiar_bought)||!me?.familiar);
-if(me?.familiar&&!me.familiar_bought){famBtn.innerHTML='<img class="buy-fam-thumb" alt="">';famBtn.title=`Купить фамильяра: ${me.familiar.name} · 6`;attachCardImage(famBtn.querySelector('img'),me.familiar.id);bindPreview(famBtn,()=>me.familiar)}else{famBtn.innerHTML=''};$('hand').replaceChildren(...(me?.hand||[]).map(c=>cardEl(c,()=>myTurn&&playCard(c))));$('permanents').replaceChildren(...(me?.zone_in_play||[]).map(c=>cardEl(c,c.activation?()=>activatePermanent(c):null)));$('attack-actions').replaceChildren(...(me?.available_attacks||[]).map(c=>deferredAttackButton(c,myTurn)));$('self-panel').classList.toggle('self-loshara',Boolean(me?.is_loshara));$('self-stats').innerHTML=me?`<div class="self-name">${escapeHtml(me.name)}${me.is_loshara?' · ЛОШАРА':''}${myTurn?' · ТВОЙ ХОД':''}</div><div class="self-meta"><span class="stat-chip health">♥ ${me.life}/${me.max_life} HP</span><span class="stat-chip power">⚡ ${me.power_available} мощи</span></div>`:'';if(me?.discard_top){$('self-discard-card').src=`https://raw.githubusercontent.com/SpongeGamer/krutagidoniwe/main/frontend/assets/cards/${encodeURIComponent(me.discard_top.id)}.webp`}else{$('self-discard-card').src='assets/cards/card_closed.webp'}$('prize-supply').classList.toggle('hidden',state.players.some(p=>p.controls_prize));renderPause(state);$('end-turn-btn').disabled=!myTurn||Boolean(state.pause?.paused);if(state.game_over&&!announcedGameOver){announcedGameOver=true;showGameOver(state)}}catch(err){showRenderError(err)}}
+if(me?.familiar&&!me.familiar_bought){famBtn.innerHTML='<img class="buy-fam-thumb" alt="">';famBtn.title=`Купить фамильяра: ${me.familiar.name} · 6`;attachCardImage(famBtn.querySelector('img'),me.familiar.id);bindPreview(famBtn,()=>me.familiar)}else{famBtn.innerHTML=''};$('hand').replaceChildren(...(me?.hand||[]).map(c=>cardEl(c,()=>myTurn&&playCard(c))));$('permanents').replaceChildren(...(me?.zone_in_play||[]).map(c=>cardEl(c,c.activation?()=>activatePermanent(c):null)));$('attack-actions').replaceChildren(...(me?.available_attacks||[]).map(c=>deferredAttackButton(c,myTurn)));$('self-panel').classList.toggle('self-loshara',Boolean(me?.is_loshara));$('self-stats').innerHTML=me?`<div class="self-name">${escapeHtml(me.name)}${me.is_loshara?' · ЛОШАРА':''}${myTurn?' · ТВОЙ ХОД':''}</div><div class="self-meta"><span class="stat-chip health">♥ ${me.life}/${me.max_life} HP</span><span class="stat-chip power">⚡ ${me.power_available} мощи</span></div>`:'';if(me?.discard_top){$('self-discard-card').src=`assets/cards/${encodeURIComponent(me.discard_top.id)}.webp`}else{$('self-discard-card').src='assets/cards/card_closed.webp'}$('prize-supply').classList.toggle('hidden',state.players.some(p=>p.controls_prize));renderPause(state);$('end-turn-btn').disabled=!myTurn||Boolean(state.pause?.paused);if(state.game_over&&!announcedGameOver){announcedGameOver=true;showGameOver(state)}}catch(err){showRenderError(err)}}
 function renderVisualEvent(event){const toast=$('activity-toast');if(!event||!event.seq)return;if(event.seq===lastToastSequence)return;lastToastSequence=event.seq;const card=event.cards?.[0];const verb=event.type==='buy'?'покупает':event.type==='play'?'разыгрывает':event.type==='turn'?'получает ход':'заканчивает ход';toast.innerHTML=`<b>${escapeHtml(event.player)}</b> ${verb}${card?`: <span>${escapeHtml(card.name)}</span>`:''}`;toast.classList.remove('hidden');clearTimeout(toastTimer);toastTimer=setTimeout(()=>toast.classList.add('hidden'),1500)}
 function renderEvent(event){
   const modal=$('event-modal');
@@ -439,6 +474,7 @@ function renderEvent(event){
   if(isToken&&event.owner){who.classList.remove('hidden');who.textContent=(event.owner_id===myId?'Ты получаешь':`${event.owner} получает`)+' этот жетон'}
   else who.classList.add('hidden');
   $('event-continue').textContent=isToken?'Понятно →':'Показать эффект →';
+  $('event-continue').disabled=false;
   // Беспредел и Мегабеспредел объявляем громко: вспышка, тряска, надпись.
   const kind=(event.type||'');
   if(!isToken&&/еспредел/i.test(kind)&&lastBurstKey!==(kind+'|'+(event.name||''))){
