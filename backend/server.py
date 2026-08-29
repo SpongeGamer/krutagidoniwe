@@ -193,7 +193,7 @@ class Room:
                 # Сначала ПОКАЗЫВАЕМ карту всем и держим паузу, чтобы люди
                 # успели прочитать, и только потом применяем эффект.
                 await self.broadcast()
-                await asyncio.sleep(3.4)
+                await asyncio.sleep(6.0)
                 game.resolve_event()
                 await self.broadcast()
                 await asyncio.sleep(1.1)
@@ -206,9 +206,13 @@ class Room:
                 options = game.pending_decision.get("options", [])
                 if not bot or not options:
                     break
+                # Люди должны успеть прочитать, что происходит у бота:
+                # сначала показываем вопрос, держим паузу, только потом отвечаем.
+                await self.broadcast()
+                await asyncio.sleep(3.2)
                 game.resolve_decision(bot, options[0]["id"])
                 await self.broadcast()
-                await asyncio.sleep(0.7)
+                await asyncio.sleep(1.4)
                 continue
             active = game.active_player
             if not self.is_bot(active.id):

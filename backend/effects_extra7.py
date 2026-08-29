@@ -115,7 +115,7 @@ def _leg_captain(game, player, card, **kw):
 
     game.request_decision(
         player, card.name, f"Карты из колоды {target.name}", options, resolve,
-        revealed_cards=[{"id": c, "name": game.cards[c].name} for c in revealed],
+        revealed_cards=[game.card_public(c) for c in revealed],
     )
 
 
@@ -156,7 +156,16 @@ def _leg_loshash(game, player, card, **kw):
 
 @effect("leg_sexlight")
 def _leg_sexlight(game, player, card, **kw):
-    pass  # +1 мощь за жетон ЖДК — в start_turn
+    """Постоянка: +1 мощь за каждый жетон ЖДК.
+
+    Начисляем СРАЗУ при выкладывании — игрок не должен ждать следующего
+    хода, чтобы увидеть эффект. В start_turn мощь начислится снова.
+    """
+    bonus = len(player.death_tokens)
+    if bonus:
+        player.power_available += bonus
+        game.log(f"{player.name}: «{card.name}» +{bonus} мощи за жетоны "
+                 f"(всего {player.power_available})")
 
 
 @effect("leg_tronado")

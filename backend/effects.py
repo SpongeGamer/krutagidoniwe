@@ -118,17 +118,26 @@ def _wild_magic(game, player, card, **kw):
     else:
         target_id = kw.get("target_id")
         target = game.get_player(target_id)
-        if not target or not target.deck:
-            game.reshuffle_discard_into_deck(target) if target else None
-        if target and target.deck:
-            top_id = target.deck.pop()
-            top_card = game.cards[top_id]
-            game.log(f"{player.name}: Шальная магия -> разыгрывает {top_card.name} из колоды {target.name}")
-            game.apply_card_effect(player, top_card, **kw)
-            if top_card.postoyanka:
-                player.zone_in_play.append(top_id)
-            else:
-                target.discard.append(top_id)
+        if not target:
+            return
+        if not target.deck:
+            game.reshuffle_discard_into_deck(target)
+        if not target.deck:
+            game.log(f"{player.name}: у {target.name} нет карт в колоде — красть нечего")
+            return
+        top_id = target.deck.pop()
+        top_card = game.cards[top_id]
+        game.log(f"{player.name}: Шальная магия крадёт «{top_card.name}» из колоды {target.name}")
+        # Показываем украденную карту всем: она летит из колоды врага на стол.
+        game.emit_visual_event("play", player, [top_id], "deck", "table")
+        # Карта считается сыгранной этим игроком: работает весь ход целиком.
+        player.in_play_this_turn.append(top_id)
+        player.power_available += top_card.power
+        if top_card.power:
+            game.log(f"{player.name}: «{top_card.name}» +{top_card.power} мощи (всего {player.power_available})")
+        game.apply_card_effect(player, top_card, **kw)
+        # В конце хода вернётся владельцу — помечаем, чтобы end_turn знал куда.
+        player.borrowed_cards.append((top_id, target.id))
 
 
 @effect("spec_vyal")

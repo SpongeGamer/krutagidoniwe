@@ -619,3 +619,76 @@ input { user-select:text; -webkit-user-select:text; }
   .besp-burst.run .besp-glow,.besp-burst.run .besp-embers,
   .besp-burst.run .besp-word span,.board-shell.quake{animation-duration:.01ms!important}
 }
+
+/* ============ v60: извержение медленнее, окно выплывает мягко ============ */
+
+/* Вспышка и искры живут дольше — есть что разглядывать */
+.besp-burst.run .besp-glow{animation-duration:2.6s!important}
+.besp-burst.run .besp-embers{animation-duration:3.2s!important}
+
+/* Надпись: вылетает, ЗАВИСАЕТ на экране и только потом тает */
+.besp-burst.run .besp-word span{
+  animation:besp-letter-hold 3.4s cubic-bezier(.18,1.5,.4,1) forwards!important;
+}
+@keyframes besp-letter-hold{
+  0%   {opacity:0;transform:translateY(90px) rotate(-14deg) scale(.6)}
+  12%  {opacity:1;transform:translateY(-10px) rotate(3deg)  scale(1.14)}
+  20%  {opacity:1;transform:translateY(0)     rotate(0)     scale(1)}
+  72%  {opacity:1;transform:translateY(0)     rotate(0)     scale(1)}   /* пауза: читаем */
+  100% {opacity:0;transform:translateY(-26px) rotate(0)     scale(1.06)}
+}
+
+/* Окно Беспредела больше не выскакивает — медленно проявляется снизу */
+#event-modal:not(.hidden) .event-card{
+  animation:besp-card-slow 1.05s cubic-bezier(.16,.9,.3,1) both!important;
+}
+@keyframes besp-card-slow{
+  0%  {opacity:0;transform:translateY(54px) scale(.94);filter:blur(6px)}
+  55% {opacity:.85}
+  100%{opacity:1;transform:none;filter:blur(0)}
+}
+/* Затемнение позади окна тоже нарастает плавно */
+#event-modal:not(.hidden){animation:besp-veil .7s ease both}
+@keyframes besp-veil{from{background:#07030b00}to{background:#07030bbd}}
+
+@media (prefers-reduced-motion:reduce){
+  .besp-burst.run .besp-word span,
+  #event-modal:not(.hidden) .event-card,
+  #event-modal:not(.hidden){animation-duration:.01ms!important}
+}
+
+/* ============ v62: живой подсчёт очков + подтверждение активации ============ */
+
+.score-row{transition:border-color .2s,background .2s,transform .2s}
+.score-row.is-active{border-color:#ffd04e!important;background:#3d2440!important;transform:scale(1.02)}
+.score-vp{transition:color .2s}
+.score-vp.bump-good{animation:vp-good .55s ease}
+.score-vp.bump-bad{animation:vp-bad .55s ease}
+@keyframes vp-good{
+  0%{transform:scale(1);color:#ffd34e}
+  40%{transform:scale(1.45);color:#9dff87}
+  100%{transform:scale(1);color:#ffd34e}
+}
+@keyframes vp-bad{
+  0%{transform:scale(1);color:#ffd34e}
+  40%{transform:scale(1.3);color:#ff7a8f}
+  100%{transform:scale(1);color:#ffd34e}
+}
+.score-sub.flash{animation:sub-flash .6s ease}
+@keyframes sub-flash{
+  0%{opacity:0;transform:translateX(10px)}
+  100%{opacity:1;transform:none}
+}
+.score-row.is-winner{
+  border-color:#ffd04e!important;background:#4b2c40!important;
+  box-shadow:0 0 18px #ffc83d55;
+}
+#gameover-winner.reveal{animation:win-reveal .8s cubic-bezier(.2,1.4,.4,1) both}
+@keyframes win-reveal{
+  0%{opacity:0;transform:scale(.7) translateY(14px)}
+  60%{opacity:1;transform:scale(1.12)}
+  100%{opacity:1;transform:none}
+}
+
+/* Текст постоянки в окне подтверждения */
+.act-text{margin:8px 0 0;color:#e6d8e6;font-size:12px;line-height:1.45;text-align:left}

@@ -60,6 +60,10 @@ def _def_notarius(game, defender, attacker, card):
         return
     top_id = game.main_deck[-1]
     top = game.cards[top_id]
+    # По тексту карты беспредел брать НЕЛЬЗЯ — окно с выбором показывать незачем.
+    if top.type in ("Беспредел", "Мегабеспредел"):
+        game.log(f"{defender.name}: под верхней картой барахолки беспредел — забрать нельзя")
+        return
     options = [
         {"id": "take", "label": f"Забрать «{top.name}» бесплатно"},
         {"id": "skip", "label": "Оставить в колоде"},
@@ -73,7 +77,7 @@ def _def_notarius(game, defender, attacker, card):
 
     game.request_decision(
         defender, card.name, f"Верхняя карта барахолки: {top.name}", options, resolve,
-        revealed_cards=[{"id": top.id, "name": top.name}],
+        revealed_cards=[game.card_public(top_id)],
     )
 
 
@@ -333,7 +337,9 @@ def _beast_beer(game, player, card, **kw):
 
 @effect("beast_jellotit")
 def _beast_jellotit(game, player, card, **kw):
-    pass  # постоянка +1 мощь, учитывается в start_turn
+    """Постоянка: +1 мощь. Начисляем сразу при выкладывании."""
+    player.power_available += 1
+    game.log(f"{player.name}: «{card.name}» +1 мощь (всего {player.power_available})")
 
 
 @effect("beast_geek")
@@ -379,7 +385,9 @@ def _def_jaba(game, defender, attacker, card):
 
 @effect("place_vyaltower")
 def _place_vyaltower(game, player, card, **kw):
-    pass  # 2 вялые палочки выдаются при получении карты, +1 мощь в start_turn
+    """Постоянка: +1 мощь. Начисляем сразу при выкладывании."""
+    player.power_available += 1
+    game.log(f"{player.name}: «{card.name}» +1 мощь (всего {player.power_available})")
 
 
 @effect("place_dirty")
@@ -389,7 +397,10 @@ def _place_dirty(game, player, card, **kw):
 
 @effect("place_circus")
 def _place_circus(game, player, card, **kw):
-    pass  # +2 мощи лошаре в start_turn, ПО в конце игры
+    """Постоянка: если ты лошара, +2 мощи. Срабатывает сразу."""
+    if player.is_loshara:
+        player.power_available += 2
+        game.log(f"{player.name}: «{card.name}» +2 мощи лошаре (всего {player.power_available})")
 
 
 @effect("place_souv")

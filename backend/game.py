@@ -86,6 +86,7 @@ class Player:
     received_this_turn: list = field(default_factory=list)
     no_defense_turn: bool = False
     hand_limit_bonus: int = 0
+    borrowed_cards: list = field(default_factory=list)  # (card_id, владелец) — Шальная магия
     next_attack_unavoidable: bool = False   # «Бензопила»: следующей атаке нельзя помешать
     brotality_active: bool = False          # «Браталити»: убитый не получит жетон ЖДК
     damage_dealt_this_turn: int = 0         # для «Ультимативного тронадо»
@@ -417,7 +418,8 @@ class GameState:
         return {"ok": True}
 
     def request_decision_sequence(self, players: list[Player], title: str, text_for_player: Callable,
-                                  options_for_player: Callable, apply_choice: Callable, done: Optional[Callable] = None):
+                                  options_for_player: Callable, apply_choice: Callable, done: Optional[Callable] = None,
+                                  cards_for_player: Optional[Callable] = None):
         """Последовательно спросить решение у нескольких игроков.
         Нужен Беспределам: не даёт одному игроку принимать выбор за всех.
         """
@@ -434,7 +436,13 @@ class GameState:
             def resolve(choice: str):
                 apply_choice(current, choice)
                 step(index + 1)
-            self.request_decision(current, title, text_for_player(current), options, resolve)
+            # Игрок должен ВИДЕТЬ карты, о которых его спрашивают.
+            revealed = None
+            if cards_for_player:
+                ids = cards_for_player(current) or []
+                revealed = [self.card_public(cid) for cid in ids if cid in self.cards]
+            self.request_decision(current, title, text_for_player(current), options, resolve,
+                                  revealed_cards=revealed)
         step(0)
 
     # ------------------------------------------------------------------ #
@@ -455,6 +463,7 @@ class GameState:
         # Постоянки с прямой мощью применяются в начале каждого своего хода.
         p.damage_dealt_this_turn = 0
         p.first_damage_bonus_done = False
+        p.borrowed_cards = []
         p.next_attack_unavoidable = False
         p.brotality_active = False
         static_power = 0
@@ -751,7 +760,17 @@ class GameState:
             return {"error": "Сначала завершите текущий выбор или атаку"}
         player.discard.extend(player.hand)
         player.hand = []
-        played_cards = player.in_play_this_turn[:]
+        # Карты, украденные Шальной магией, возвращаются владельцу в его сброс.
+        borrowed = {cid: owner for cid, owner in player.borrowed_cards}
+        player.borrowed_cards = []
+        played_cards = [c for c in player.in_play_this_turn if c not in borrowed]
+        for cid, owner_id in borrowed.items():
+            owner = self.get_player(owner_id)
+            if owner:
+                owner.discard.append(cid)
+                self.log(f"«{self.cards[cid].name}» возвращается в сброс {owner.name}")
+            else:
+                player.discard.append(cid)
         player.discard.extend(played_cards)
         # постоянки уже перенесены в zone_in_play при розыгрыше, не дублируем
         player.in_play_this_turn = []
@@ -1078,7 +1097,7 @@ class GameState:
 
                 self.request_decision(player, "Халява!", f"Верхняя карта: {top.name}",
                                       options, choose,
-                                      revealed_cards=[{"id": top.id, "name": top.name}])
+                                      revealed_cards=[self.card_public(top_id)])
         elif token_id == "dk_27":
             # Каждый враг МОЖЕТ показать средний палец: сбрось 1 карту за каждого.
             enemies = [e for e in self.enemies_of(player) if e.is_alive()]
@@ -1124,7 +1143,7 @@ class GameState:
             tok = self.zhdk.get(token_id, {})
             tok_name = tok.get("name", token_id)
             tok_text = tok.get("effect_text", "")
-            self.log(f"{player.name} подох и получает ЖДК: {tok_name} — {tok_text}")
+            self.log(f"{player.name} получает жетон дохлого колдуна: «{tok_name}». {tok_text}")
             # Показываем жетон крупно: игрок должен видеть, что именно ему выпало.
             self.pending_event = {
                 "id": token_id,
@@ -1161,45 +1180,78 @@ class GameState:
             pool = p.zone_in_play + p.hand + p.discard + p.deck
             vp = 0
             legends = 0
+            # Разбивка по статьям — из неё строится «подсчёт вживую» в конце партии.
+            steps: list[dict] = []
+
+            def add_step(label: str, delta: int, kind: str = "plain"):
+                if delta:
+                    steps.append({"label": label, "delta": delta, "kind": kind})
+
+            cards_vp = 0
+            sticks_vp = 0
+            treasure_vp = 0
             for cid in pool:
                 c = self.cards[cid]
                 vp += c.vp
+                cards_vp += c.vp
                 if c.type == "Легенда":
                     legends += 1
                 if c.type == WEAK_STICK_TYPE:
                     vp -= 1
+                    sticks_vp -= 1
                 if p.property_id == "svo_1" and "Сокровище" in c.types_for_matching:
                     vp += 1
+                    treasure_vp += 1
+            add_step(f"Очки на картах ({len(pool)} шт.)", cards_vp, "cards")
+            add_step("Вялые палочки", sticks_vp, "bad")
+            add_step("Свойство «Скидка на сокровища»", treasure_vp, "good")
             # Условные ПО карт, лежащих у игрока.
             if "beast_geek" in pool:
-                vp += sum(1 for cid in pool if "Тварь" in self.cards[cid].types_for_matching)
+                _b = sum(1 for cid in pool if "Тварь" in self.cards[cid].types_for_matching)
+                vp += _b
+                add_step("Потный Гикпиг: за тварей", _b, "good")
             if "leg_goose" in pool:
                 vp += 2 * legends
+                add_step("Гусыня: за легенды", 2 * legends, "good")
             if "place_circus" in pool and p.is_loshara:
                 vp += 10  # базовый штраф лошары (-5) становится бонусом (+5)
+                add_step("Цирк Лошашных: штраф стал бонусом", 10, "good")
             if "leg_viagrus" in pool:
                 # Вялые палочки перестают быть штрафом: компенсируем уже снятые -1 ПО.
-                vp += sum(1 for cid in pool if self.cards[cid].type == WEAK_STICK_TYPE)
+                _v = sum(1 for cid in pool if self.cards[cid].type == WEAK_STICK_TYPE)
+                vp += _v
+                add_step("Виагрус: палочки не штрафуют", _v, "good")
             if p.familiar_card_id and p.familiar_bought:
-                vp += self.cards[p.familiar_card_id].vp
+                _f = self.cards[p.familiar_card_id].vp
+                vp += _f
+                add_step(f"Фамильяр «{self.cards[p.familiar_card_id].name}»", _f, "good")
             # Главный приз Крутагидона даёт +5 ПО владельцу.
             # Жетон «Неглавный приз» (dk_8) этот бонус отменяет.
             if p.controls_prize and "dk_8" not in p.death_tokens:
                 vp += 5
+                add_step("Главный приз Крутагидона", 5, "prize")
             if p.is_loshara:
                 vp -= 5
+                add_step("Ты лошара", -5, "bad")
             for tid in p.death_tokens:
                 tok = self.zhdk.get(tid)
-                vp += (tok.get("vp_penalty", -3) if tok else -3)
+                _pen = (tok.get("vp_penalty", -3) if tok else -3)
+                vp += _pen
+                add_step(f"Жетон «{tok.get('name', tid) if tok else tid}»", _pen, "bad")
             weak_count = sum(1 for cid in pool if self.cards[cid].type == WEAK_STICK_TYPE)
             if "dk_16" in p.death_tokens and "leg_viagrus" not in pool:
                 vp -= weak_count
+                add_step("Жетон dk_16: палочки вдвойне", -weak_count, "bad")
             if "dk_4" in p.death_tokens and p.is_loshara:
                 vp -= 5
+                add_step("Жетон dk_4: лошара вдвойне", -5, "bad")
             # Два сапога взаимно уничтожаются в конце игры вместе со штрафами.
             if "dk_13" in p.death_tokens and "dk_14" in p.death_tokens:
-                vp -= self.zhdk["dk_13"].get("vp_penalty", -8) + self.zhdk["dk_14"].get("vp_penalty", -8)
-            scores[p.id] = {"vp": vp, "legends": legends, "death_tokens": len(p.death_tokens)}
+                _pair = -(self.zhdk["dk_13"].get("vp_penalty", -8) + self.zhdk["dk_14"].get("vp_penalty", -8))
+                vp += _pair
+                add_step("Два сапога — пара: штрафы сняты", _pair, "good")
+            scores[p.id] = {"vp": vp, "legends": legends,
+                            "death_tokens": len(p.death_tokens), "steps": steps}
         self.logs.append("=== ИГРА ОКОНЧЕНА ===")
         best = max(scores.items(), key=lambda kv: (kv[1]["vp"], kv[1]["legends"], -kv[1]["death_tokens"]))
         self.winner = best[0]
@@ -1210,6 +1262,16 @@ class GameState:
     # ------------------------------------------------------------------ #
     # Сериализация состояния для фронтенда
     # ------------------------------------------------------------------ #
+    def card_public(self, cid: str) -> dict:
+        """Полные данные карты для показа в окнах решений.
+
+        Раньше сюда клали только id и name — из-за этого в карточке
+        вылезали «undefined» вместо стоимости и мощи.
+        """
+        c = self.cards[cid]
+        return {"id": c.id, "name": c.name, "type": c.type, "cost": c.cost,
+                "power": c.power, "vp": c.vp, "text": c.full_text}
+
     def to_public_dict(self, viewer_id: Optional[str] = None) -> dict:
         def card_brief(cid):
             c = self.cards[cid]
@@ -1290,6 +1352,7 @@ class GameState:
                     "vp": self.final_scores[pl.id]["vp"],
                     "legends": self.final_scores[pl.id]["legends"],
                     "death_tokens": self.final_scores[pl.id]["death_tokens"],
+                    "steps": self.final_scores[pl.id].get("steps", []),
                     "is_loshara": pl.is_loshara,
                     "controls_prize": pl.controls_prize,
                 }

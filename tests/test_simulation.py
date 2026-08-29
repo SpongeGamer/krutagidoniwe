@@ -374,7 +374,8 @@ def test_dirty_stick_boosts_all_sticks():
     _auto_resolve(game)
 
     # 1 базовый + 2 от «Грязной палки» = 3 урона -> враг с 2 HP обязан подохнуть
-    assert any("подох" in line for line in game.logs), "враг с 2 HP должен был умереть от 3 урона"
+    assert any("3 урона" in line for line in game.logs), "урон должен быть 3, а не 1"
+    assert len(foe.death_tokens) == 1, "враг с 2 HP должен был умереть от 3 урона"
 
 
 def test_dirty_stick_gives_power():

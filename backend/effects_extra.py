@@ -55,12 +55,21 @@ def sosok(game, player, card, **kw):
 
 @effect("wiz_blacksheep")
 def blacksheep(game, player, card, **kw):
-    if not kw.get("use_attack", True): return
+    if not kw.get("use_attack", True):
+        return
     target = game.get_player(kw.get("target_id"))
-    if target and game.legend_deck:
-        cid = game.legend_deck.pop(); destroyed = game.cards[cid]
-        game.destroyed_pile.append(cid)
-        game.attack_target(player, card, target.id, destroyed.cost)
+    if not target:
+        return
+    if not game.legend_deck:
+        game.log(f"{card.name}: колода легенд пуста — уничтожать нечего, урона нет")
+        return
+    cid = game.legend_deck.pop()
+    destroyed = game.cards[cid]
+    game.destroyed_pile.append(cid)
+    # Показываем, ЧТО уничтожено и почему такой урон.
+    game.log(f"{card.name}: уничтожена легенда «{destroyed.name}» (стоимость {destroyed.cost}) — "
+             f"{target.name} отхватывает {destroyed.cost} урона")
+    game.attack_target(player, card, target.id, destroyed.cost)
 
 
 @effect("wiz_peel")

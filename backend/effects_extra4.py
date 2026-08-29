@@ -243,7 +243,11 @@ def besp_18(game, player, card, **kw):
         if choice=="destroy":
             for cid in revealed[target.id][:]:
                 if cid in target.discard: game.destroy_from_zone(target,cid,"discard")
-    game.request_decision_sequence(game.players,"БЕСПРЕДЕЛ: две верхние",lambda p:"Уничтожить обе сброшенные карты или ни одной?",opts,apply)
+    def text(target):
+        names=[game.cards[c].name for c in revealed[target.id]]
+        return ("Сброшены: "+", ".join(names)+". Уничтожить обе или оставить?") if names else "Колода пуста"
+    game.request_decision_sequence(game.players,"БЕСПРЕДЕЛ: две верхние карты",text,opts,apply,
+                                   cards_for_player=lambda t: revealed.get(t.id, []))
 
 
 @effect("besp_19")

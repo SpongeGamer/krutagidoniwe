@@ -183,7 +183,7 @@ function playVisualMotion(motion,event){
   }
 }
 /* ---------- Счётчики стопок и диагностика (v43) ---------- */
-const BUILD_TAG='v59';
+const BUILD_TAG='v62';
 function setPileCounts(me){
   const d=$('self-deck-count'),c=$('self-discard-count');
   if(d)d.textContent=(me&&Number.isFinite(me.deck_count))?me.deck_count:0;
@@ -258,18 +258,70 @@ function bindPreview(el,getCard){
 /* Экран итогов вместо alert — v51 */
 function showGameOver(state){
   const rows=state.final_scores||[];
-  const win=state.players.find(p=>p.id===state.winner);
-  $('gameover-winner').textContent=win?`Победитель: ${win.name}`:'Игра окончена';
-  $('gameover-table').innerHTML=rows.length?rows.map((r,i)=>`
-    <div class="score-row${r.id===state.winner?' is-winner':''}">
-      <span class="score-place">${i+1}</span>
+  const modal=$('gameover-modal');
+  $('gameover-winner').textContent='Подсчёт очков…';
+  $('gameover-table').innerHTML=rows.map(r=>`
+    <div class="score-row" data-pid="${r.id}">
+      <span class="score-place">·</span>
       <span class="score-ava">${escapeHtml(r.avatar||'')}</span>
-      <span class="score-name">${escapeHtml(r.name)}${r.id===myId?' · Ты':''}${r.is_loshara?' · лошара':''}${r.controls_prize?' · приз':''}</span>
-      <span class="score-sub">легенд ${r.legends} · ЖДК ${r.death_tokens}</span>
-      <span class="score-vp">${r.vp} ПО</span>
-    </div>`).join(''):'<div class="score-row">Счёт недоступен</div>';
-  $('gameover-modal').classList.remove('hidden');
+      <span class="score-name">${escapeHtml(r.name)}${r.id===myId?' · Ты':''}</span>
+      <span class="score-sub"></span>
+      <span class="score-vp">0</span>
+    </div>`).join('');
+  $('gameover-close').classList.add('hidden');
+  modal.classList.remove('hidden');
+  countUpScores(state,rows);
 }
+/* Очки набегают по статьям — интрига до последней карты (v62) */
+function countUpScores(state,rows){
+  const running={};rows.forEach(r=>running[r.id]=0);
+  // все шаги всех игроков вперемешку по порядку статей
+  const maxSteps=Math.max(0,...rows.map(r=>(r.steps||[]).length));
+  const queue=[];
+  for(let i=0;i<maxSteps;i++)rows.forEach(r=>{const st=(r.steps||[])[i];if(st)queue.push({pid:r.id,st})});
+  let k=0;
+  const tick=()=>{
+    if(k>=queue.length){finishCount(state,rows);return}
+    const {pid,st}=queue[k++];
+    running[pid]+=st.delta;
+    const row=$('gameover-table').querySelector(`[data-pid="${CSS.escape(pid)}"]`);
+    if(row){
+      const vp=row.querySelector('.score-vp');
+      vp.textContent=running[pid];
+      vp.classList.remove('bump-good','bump-bad');
+      void vp.offsetWidth;
+      vp.classList.add(st.delta>0?'bump-good':'bump-bad');
+      const sub=row.querySelector('.score-sub');
+      sub.textContent=`${st.delta>0?'+':''}${st.delta} · ${st.label}`;
+      sub.classList.remove('flash');void sub.offsetWidth;sub.classList.add('flash');
+      row.classList.add('is-active');
+      setTimeout(()=>row.classList.remove('is-active'),700);
+    }
+    playSound('click');
+    setTimeout(tick,760);
+  };
+  setTimeout(tick,900);
+}
+function finishCount(state,rows){
+  const win=state.players.find(p=>p.id===state.winner);
+  const table=$('gameover-table');
+  rows.forEach((r,i)=>{
+    const row=table.querySelector(`[data-pid="${CSS.escape(r.id)}"]`);
+    if(!row)return;
+    row.querySelector('.score-place').textContent=i+1;
+    row.querySelector('.score-vp').textContent=`${r.vp} ПО`;
+    row.querySelector('.score-sub').textContent=`легенд ${r.legends} · ЖДК ${r.death_tokens}`;
+    row.querySelector('.score-sub').classList.remove('flash');
+    if(r.id===state.winner)row.classList.add('is-winner');
+  });
+  setTimeout(()=>{
+    $('gameover-winner').textContent=win?`Победитель: ${win.name}`:'Игра окончена';
+    $('gameover-winner').classList.add('reveal');
+    $('gameover-close').classList.remove('hidden');
+    playSound('turn');
+  },700);
+}
+
 /* ---------- Пауза: партия ждёт, никто ничего не теряет ---------- */
 function renderPause(state){
   const info=state.pause||{};
@@ -328,7 +380,7 @@ function playBespredelBurst(isMega){
     setTimeout(()=>shell.classList.remove('quake'),900)}
   playSound('turn');
   clearTimeout(playBespredelBurst._t);
-  playBespredelBurst._t=setTimeout(()=>{box.classList.add('hidden');box.classList.remove('run')},2300);
+  playBespredelBurst._t=setTimeout(()=>{box.classList.add('hidden');box.classList.remove('run')},3600);
 }
 function escapeHtml(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function cardEl(card,onClick){const el=document.createElement('article');el.className='card'+(onClick?' is-actionable':'');el.dataset.cardId=card.id;el.title=`${card.name}\n${card.text||''}`;const img=document.createElement('img');img.className='cart-img';img.alt=card.name;img.loading='lazy';img.onload=()=>el.classList.add('has-image');attachCardImage(img,card.id,()=>{img.remove();el.classList.remove('has-image')});const info=document.createElement('div');info.className='card-info';info.innerHTML=`<div class="cname">${escapeHtml(card.name)}</div><div class="ctext">${escapeHtml((card.text||'').slice(0,128))}</div><div class="cfooter"><span class="cost">◉ ${card.cost}</span><span class="power">⚡ +${card.power}</span></div>`;el._cardData=card;const zoom=document.createElement('button');zoom.className='card-zoom';zoom.type='button';zoom.textContent='⌕';zoom.title='Открыть карту';zoom.onclick=(event)=>{event.stopPropagation();showCard(card)};el.append(img,info,zoom);if(onClick)el.onclick=onClick;return el}
@@ -373,7 +425,7 @@ function renderEvent(event){
   const modal=$('event-modal');
   if(!event){modal.classList.add('hidden');return}
   const isToken=(event.type||'').includes('дохлого колдуна');
-  $('event-type').textContent=isToken?'ЖЕТОН ДОХЛОГО КОЛДУНА':(event.type||'СОБЫТИЕ');
+  $('event-type').textContent=isToken?((event.owner_id===myId?'ТЫ ПОЛУЧАЕШЬ':((event.owner||'Игрок').toUpperCase()+' ПОЛУЧАЕТ'))+' ЖЕТОН'):(event.type||'СОБЫТИЕ');
   $('event-name').textContent=event.name||'Событие';
   $('event-text').textContent=event.text||'';
   // Картинка жетона: показываем, ЧТО именно выпало, а не только имя строкой.
@@ -392,7 +444,7 @@ function renderEvent(event){
   if(!isToken&&/еспредел/i.test(kind)&&lastBurstKey!==(kind+'|'+(event.name||''))){
     lastBurstKey=kind+'|'+(event.name||'');
     playBespredelBurst(/Мега/i.test(kind));
-    setTimeout(()=>modal.classList.remove('hidden'),620);
+    setTimeout(()=>modal.classList.remove('hidden'),3000);
     return;
   }
   if(isToken||!/еспредел/i.test(kind))lastBurstKey='';
@@ -408,6 +460,24 @@ function openTargetModal(card){pendingTargetCard=card;$('target-card-name').text
 function closeTargetModal(){$('target-modal').classList.add('hidden');pendingTargetCard=null}
 function sendPlay(card,params){playSound('card');ws.send(JSON.stringify({action:'play_card',card_id:card.id,params}))}
 function sendAttackActivation(card,params){playSound('card');ws.send(JSON.stringify({action:'activate_attack',card_id:card.id,params}))}
-function activatePermanent(card){if(['beast_jaba','leg_throne'].includes(card.id)){permanentActivationCard=card;openTargetModal(card)}else sendPermanentActivation(card,{})}
+function activatePermanent(card){
+  // Мисклик по постоянке не должен уничтожать карту — сначала спрашиваем.
+  const needTarget=['beast_jaba','leg_throne'].includes(card.id);
+  confirmActivation(card,()=>{
+    if(needTarget){permanentActivationCard=card;openTargetModal(card)}
+    else sendPermanentActivation(card,{});
+  });
+}
+function confirmActivation(card,onYes){
+  $('confirm-act-title').textContent=card.name;
+  $('confirm-act-text').textContent=card.text||'';
+  const photo=$('confirm-act-photo');
+  photo.innerHTML='<img alt="">';
+  attachCardImage(photo.querySelector('img'),card.id,()=>{photo.innerHTML=''});
+  $('confirm-act-yes').onclick=()=>{$('confirm-act-modal').classList.add('hidden');onYes()};
+  $('confirm-act-no').onclick=()=>$('confirm-act-modal').classList.add('hidden');
+  $('confirm-act-close').onclick=()=>$('confirm-act-modal').classList.add('hidden');
+  $('confirm-act-modal').classList.remove('hidden');
+}
 function sendPermanentActivation(card,params){playSound('card');ws.send(JSON.stringify({action:'activate_permanent',card_id:card.id,params}))}
 
