@@ -540,3 +540,69 @@ def test_two_deaths_show_both_tokens():
     game.resolve_event()
     assert game.pending_event, "второе окно не открылось"
     assert game.pending_event["owner"] != first_owner, "показан тот же игрок"
+
+
+def test_viagrus_sticks_give_points():
+    """«Виагрус»: вялые палочки ПРИНОСЯТ ПО, а не просто перестают отнимать."""
+    def score(with_viagrus):
+        game = GameState(["Т", "В"], seed=1)
+        p = game.players[0]
+        p.deck.extend(["spec_vyal"] * 3)
+        if with_viagrus:
+            p.zone_in_play.append("leg_viagrus")
+        game._finish_game()
+        steps = {s["label"]: s["delta"] for s in game.final_scores[p.id]["steps"]}
+        return steps.get("Вялые палочки", 0) + steps.get("Виагрус: палочки приносят ПО", 0)
+
+    assert score(False) == -3, "три палочки должны давать -3 ПО"
+    assert score(True) == 3, "с Виагрусом три палочки должны давать +3 ПО"
+
+
+def test_circus_flips_loshara_penalty():
+    """«Цирк»: штраф за лошару становится бонусом."""
+    def loshara_total(with_circus):
+        game = GameState(["Т", "В"], seed=1)
+        p = game.players[0]
+        p.is_loshara = True
+        if with_circus:
+            p.zone_in_play.append("place_circus")
+        game._finish_game()
+        steps = {s["label"]: s["delta"] for s in game.final_scores[p.id]["steps"]}
+        return steps.get("Ты лошара", 0) + steps.get("Цирк Лошашных: штраф стал бонусом", 0)
+
+    assert loshara_total(False) == -5
+    assert loshara_total(True) == 5, "Цирк должен превратить -5 в +5"
+
+
+def test_viagrus_power_on_stick():
+    """«Виагрус»: каждая сыгранная вялая палочка даёт +3 мощи."""
+    def power_after(with_viagrus, sticks=1):
+        game = GameState(["Я", "Враг"], seed=3)
+        me = game.active_player
+        if with_viagrus:
+            me.zone_in_play.append("leg_viagrus")
+        me.power_available = 0
+        me.hand = ["spec_vyal"] * sticks
+        for _ in range(sticks):
+            game.play_card(me, "spec_vyal")
+        return me.power_available
+
+    assert power_after(False) == 0, "без Виагруса палочка не даёт мощи"
+    assert power_after(True) == 3, "с Виагрусом палочка должна давать +3"
+    assert power_after(True, 2) == 6, "две палочки — +6 мощи"
+
+
+def test_viagrus_gives_stick_each_turn():
+    """«Виагрус»: в начале своего хода выдаёт вялую палочку на руку."""
+    game = GameState(["Я", "Враг"], seed=3)
+    me = game.active_player
+    me.zone_in_play.append("leg_viagrus")
+    before = me.hand.count("spec_vyal")
+    stack_before = game.vyal_remaining
+
+    game.end_turn(me)
+    while game.active_player.id != me.id:
+        game.end_turn(game.active_player)
+
+    assert me.hand.count("spec_vyal") == before + 1, "палочка не выдана"
+    assert game.vyal_remaining == stack_before - 1, "палочка не списана из стопки"

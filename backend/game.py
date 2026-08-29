@@ -645,6 +645,11 @@ class GameState:
         if "place_dirty" in player.zone_in_play and is_stick(card.name):
             player.power_available += 1
             self.log(f"{player.name}: «Грязная палка» — +1 мощь за Палочку")
+        # «Виагрус»: всякий раз, когда играешь вялую палочку, +3 мощи.
+        if card.type == WEAK_STICK_TYPE and "leg_viagrus" in player.zone_in_play:
+            player.power_available += 3
+            self.log(f"{player.name}: «Виагрус» — +3 мощи за вялую палочку "
+                     f"(всего {player.power_available})")
         # Значок чипсины в базе обозначает мгновенное получение чипсины.
         # У карт, где чипсина уже описана условием в тексте (например Пейотка),
         # это обрабатывает их отдельный эффект, чтобы не начислять дважды.
@@ -1272,10 +1277,11 @@ class GameState:
                 vp += 10  # базовый штраф лошары (-5) становится бонусом (+5)
                 add_step("Цирк Лошашных: штраф стал бонусом", 10, "good")
             if "leg_viagrus" in pool:
-                # Вялые палочки перестают быть штрафом: компенсируем уже снятые -1 ПО.
+                # «Твои вялые палочки приносят тебе ПО, а не отнимают их»:
+                # снимаем уже вычтенный -1 и начисляем +1 сверху.
                 _v = sum(1 for cid in pool if self.cards[cid].type == WEAK_STICK_TYPE)
-                vp += _v
-                add_step("Виагрус: палочки не штрафуют", _v, "good")
+                vp += _v * 2
+                add_step("Виагрус: палочки приносят ПО", _v * 2, "good")
             if p.familiar_card_id and p.familiar_bought:
                 _f = self.cards[p.familiar_card_id].vp
                 vp += _f
