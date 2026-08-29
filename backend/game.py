@@ -18,6 +18,16 @@ from .models import (
 _DATA_DIR = os.path.join(os.path.dirname(__file__), "..")
 
 
+def is_stick(card_name: str) -> bool:
+    """Это «Палочка»?
+
+    Сравнение без учёта регистра: в базе есть и «Палочка-шлёпалочка»,
+    и «Сырная палочка» со строчной буквы. Раньше проверка была
+    регистрозависимой, и бонусы «Грязной палки» на половину карт не работали.
+    """
+    return "палочк" in (card_name or "").lower()
+
+
 def load_zhdk() -> dict[str, dict]:
     path = os.path.join(_DATA_DIR, "zhdk.json")
     if not os.path.exists(path):
@@ -583,7 +593,7 @@ class GameState:
         handler = effects.get_effect(card.id)
         if handler:
             handler(self, self.active_player, card)
-        else:
+        elif card.id not in effects.ACTIVATION_REGISTRY:
             self.log(f"[TODO] Эффект {card.id} ({card.name}) пока не реализован текстово.")
 
     def play_card(self, player: Player, card_id: str, **kwargs) -> dict:
@@ -604,7 +614,7 @@ class GameState:
         player.power_available += card.power
         if card.power:
             self.log(f"{player.name}: «{card.name}» +{card.power} мощи (всего {player.power_available})")
-        if "place_dirty" in player.zone_in_play and "Палочка" in card.name:
+        if "place_dirty" in player.zone_in_play and is_stick(card.name):
             player.power_available += 1
             self.log(f"{player.name}: «Грязная палка» — +1 мощь за Палочку")
         # Значок чипсины в базе обозначает мгновенное получение чипсины.
@@ -624,6 +634,9 @@ class GameState:
         handler = effects.get_effect(card_id)
         if handler:
             handler(self, player, card, use_attack=not defer_attack, **kwargs)
+        elif card.id in effects.ACTIVATION_REGISTRY:
+            # Постоянка с активируемым эффектом: сработает по кнопке на столе.
+            self.log(f"{player.name}: «{card.name}» — постоянка, эффект активируется кнопкой")
         elif card.full_text and card.full_text not in ("(Эффекта нет.)",):
             self.log(f"[TODO] {card.name}: текст «{card.full_text}» пока не реализован, применена только мощь")
 
@@ -652,7 +665,7 @@ class GameState:
         handler = effects.get_effect(card_id)
         if handler:
             handler(self, player, card, use_attack=True, attack_only=True, **kwargs)
-        else:
+        elif card.id not in effects.ACTIVATION_REGISTRY:
             self.log(f"[TODO] Атака «{card.name}» пока не реализована")
         return {"ok": True}
 
@@ -782,7 +795,7 @@ class GameState:
         if not target:
             return False
         target.just_died = False
-        if "Палочка" in card_name:
+        if is_stick(card_name):
             if source.property_id == "svo_10":
                 amount += 1
             if "place_dirty" in source.zone_in_play:
@@ -1218,6 +1231,18 @@ class GameState:
                 "played_this_turn": [card_brief(c) for c in p.in_play_this_turn],
                 "available_attacks": [card_brief(c) for c in p.available_attacks],
                 "death_tokens": len(p.death_tokens),
+                # Полный список жетонов: у части из них постоянные эффекты
+                # (например «Палочный беспредел»), игрок должен их видеть.
+                "death_token_cards": [
+                    {
+                        "id": tid,
+                        "name": self.zhdk.get(tid, {}).get("name", tid),
+                        "text": self.zhdk.get(tid, {}).get("effect_text", ""),
+                        "vp": self.zhdk.get(tid, {}).get("vp_penalty", -3),
+                        "permanent": bool(self.zhdk.get(tid, {}).get("postoyanka")),
+                    }
+                    for tid in p.death_tokens
+                ],
                 "property_id": p.property_id,
                 "property": ({"id": p.property_id, "name": self.svo[p.property_id]["name"], "text": self.svo[p.property_id]["effect_text"]} if p.property_id in self.svo else None),
                 "familiar":  card_brief(p.familiar_card_id) if p.familiar_card_id else None,

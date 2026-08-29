@@ -111,9 +111,13 @@ class Room:
             return []
         current = self.selected_familiars.get(player_id, [])
         if self.selected_properties.get(player_id) == "svo_2" and len(current) >= 2:
-            selected_by_other = {fid for pid, fids in self.selected_familiars.items() if pid != player_id for fid in fids}
-            reserved_by_other = {board["id"] for pid, offers in self.familiar_offers.items() if pid != player_id for board in offers}
-            return [board for board in BOARDS if board["id"] not in selected_by_other and board["id"] not in reserved_by_other]
+            # Третий фамильяр — любой, кого НЕ ВЫБРАЛИ другие игроки.
+            # Чужие «предложенные, но не выбранные» карты тут не блокируют:
+            # иначе при полном столе выбирать было бы не из чего.
+            taken = {fid for pid, fids in self.selected_familiars.items()
+                     if pid != player_id for fid in fids}
+            free = [b for b in BOARDS if b["id"] not in taken and b["id"] not in current]
+            return free
         return self.familiar_offers.get(player_id, [])
 
     def add_bot(self) -> Optional[str]:
@@ -186,6 +190,10 @@ class Room:
                 # Беспредел человека всегда ждёт клика; бот может продолжить свой.
                 if not self.is_bot(game.active_player.id):
                     break
+                # Сначала ПОКАЗЫВАЕМ карту всем и держим паузу, чтобы люди
+                # успели прочитать, и только потом применяем эффект.
+                await self.broadcast()
+                await asyncio.sleep(3.4)
                 game.resolve_event()
                 await self.broadcast()
                 await asyncio.sleep(1.1)
@@ -410,8 +418,7 @@ async def ws_endpoint(websocket: WebSocket, room_id: str):
                 # оставляет обе предложенные карты и разрешает третью из ничейных.
                 allowed = offered
                 if property_id == "svo_2" and len(current) >= 2:
-                    reserved_by_other = {board["id"] for pid, offers in room.familiar_offers.items() if pid != player_id for board in offers}
-                    allowed = {board["id"] for board in BOARDS if board["id"] not in reserved_by_other}
+                    allowed = {board["id"] for board in BOARDS}
                 if familiar_id not in allowed or familiar_id in selected_by_other:
                     await websocket.send_json({"type": "error", "message": "Этот фамильяр уже занят или недоступен"})
                 elif familiar_id not in current and len(current) < required:
@@ -432,11 +439,18 @@ async def ws_endpoint(websocket: WebSocket, room_id: str):
                 property_id = msg.get("property_id")
                 allowed = {p["id"] for p in room.property_offers.get(player_id, [])}
                 if property_id in allowed:
-                    # При смене свойства сбрасываем фамильяров и выдаём новую пару.
+                    # Выпавшая пара фамильяров закрепляется за игроком навсегда:
+                    # менять свойство можно, но перекатить фамильяров этим нельзя.
+                    previous = room.selected_properties.get(player_id)
                     room.selected_properties[player_id] = property_id
-                    room.selected_familiars.pop(player_id, None)
-                    room.familiar_offers.pop(player_id, None)
                     room.ensure_familiar_offer(player_id)
+                    # Выбор фамильяров ВСЕГДА за игроком — сервер за него не решает.
+                    # При уходе со свойства «Фамильяры» лишние карты обрезаем,
+                    # но уже сделанный выбор не трогаем.
+                    if previous == "svo_2" and property_id != "svo_2":
+                        current = room.selected_familiars.get(player_id, [])
+                        if len(current) > 1:
+                            room.selected_familiars[player_id] = current[:1]
                 else:
                     await websocket.send_json({"type": "error", "message": "Выбери одно из предложенных свойств"})
                 await room.broadcast_lobby()

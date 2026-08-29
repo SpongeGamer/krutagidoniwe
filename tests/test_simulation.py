@@ -351,3 +351,43 @@ def test_final_scores_reach_frontend():
     assert rows[0]["id"] == game.winner, "первым должен идти победитель"
     for r in rows:
         assert {"id", "name", "vp", "legends", "death_tokens"} <= set(r)
+
+
+def test_dirty_stick_boosts_all_sticks():
+    """«Грязная палка» даёт +2 урона ЛЮБОЙ Палочке, а не только с заглавной буквы."""
+    from backend.game import is_stick
+
+    # регистр в названиях карт разный — проверка обязана это переживать
+    assert is_stick("Сырная палочка")
+    assert is_stick("Палочка-шлёпалочка")
+    assert is_stick("Бузящая палочка Гарика Потного")
+    assert not is_stick("Пивохранилище")
+
+    game = GameState(["Я", "Враг"], seed=3)
+    me, foe = game.players
+    foe.hand = []
+    foe.life = 2
+    me.zone_in_play.append("place_dirty")
+    me.hand = ["start_syrpal"]
+
+    game.play_card(me, "start_syrpal", target_id=foe.id)
+    _auto_resolve(game)
+
+    # 1 базовый + 2 от «Грязной палки» = 3 урона -> враг с 2 HP обязан подохнуть
+    assert any("подох" in line for line in game.logs), "враг с 2 HP должен был умереть от 3 урона"
+
+
+def test_dirty_stick_gives_power():
+    """«Грязная палка» даёт +1 мощь за каждую разыгранную Палочку."""
+    game = GameState(["Я", "Враг"], seed=3)
+    me = game.active_player
+    game.enemies_of(me)[0].hand = []
+    me.zone_in_play.append("place_dirty")
+    me.power_available = 0
+    me.hand = ["start_syrpal"]
+
+    game.play_card(me, "start_syrpal", target_id=game.enemies_of(me)[0].id)
+    _auto_resolve(game)
+
+    # +1 мощь самой карты и +1 от «Грязной палки»
+    assert me.power_available >= 2, f"ожидалось минимум 2 мощи, получено {me.power_available}"

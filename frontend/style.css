@@ -460,3 +460,162 @@ input { user-select:text; -webkit-user-select:text; }
 .pause-icon{font-size:44px;line-height:1}
 .pause-card h2{margin:10px 0 6px;color:#ffe5a1;font-size:24px}
 .pause-card p{margin:0 0 18px;color:#e2cfe2;font-size:14px}
+
+/* ================= v54: список жетонов ЖДК ================= */
+.main-zhdk.has-tokens{cursor:pointer}
+.main-zhdk.has-tokens:hover{filter:brightness(1.35)}
+.tokens-card{width:min(520px,94vw);text-align:left}
+.tokens-card h2{margin:6px 0 14px;color:#ffe5a1;font-size:20px}
+.tokens-list{display:grid;gap:9px;max-height:60vh;overflow:auto}
+.token-row{
+  padding:11px 13px;
+  border:1px solid #ffffff1f;border-radius:10px;
+  background:#2c1a35;
+}
+.token-row.is-permanent{border-color:#ffd04e;background:#3d2440}
+.token-head{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+.token-head b{color:#ffdd82;font-size:14px}
+.token-head span{color:#ff8f9c;font-size:12px;font-weight:900;white-space:nowrap}
+.token-flag{
+  margin-top:4px;
+  color:#ffd34e;font-size:10px;font-weight:900;letter-spacing:.06em;
+}
+.token-row p{margin:6px 0 0;color:#e6d8e6;font-size:12px;line-height:1.4}
+
+
+/* ============ v57: счётчик фамильяров + плашка свойства ============
+   Вёрстку планшета НЕ трогаем — она вернулась к рабочему виду.
+   Карта фамильяра снова одна, как было. */
+
+/* Значок «сколько всего фамильяров» в углу карты */
+.familiar-card{position:relative}
+.fam-count{
+  position:absolute;right:-5px;top:-5px;
+  display:grid;place-items:center;
+  min-width:19px;height:19px;padding:0 4px;
+  border-radius:99px;
+  color:#2b1705;background:#ffd34e;
+  font-size:11px;font-weight:900;line-height:1;
+  box-shadow:0 2px 6px #000a;
+}
+
+/* Плашка свойства под планшетом */
+.property-plate{
+  display:block;width:100%;
+  margin-top:4px;padding:3px 7px;
+  border:1px solid #ffcf4c55!important;border-radius:6px;
+  color:#ffe0a0;background:#2a1730d9;
+  font-size:10px;font-weight:800;text-align:center;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  cursor:pointer;
+}
+.property-plate:hover{border-color:#ffd34e!important;background:#4a2a44;color:#fff3d0}
+
+/* Строки в окне «Фамильяры» */
+.fam-line{
+  display:grid;grid-template-columns:52px minmax(0,1fr);
+  gap:11px;align-items:center;width:100%;
+  padding:9px 11px;
+  border:1px solid #ffffff1f;border-radius:10px;
+  background:#2c1a35;text-align:left;cursor:zoom-in;
+}
+.fam-line:hover{border-color:#ffd04e;background:#3d2440}
+.fam-line img{width:52px;height:73px;object-fit:contain;border-radius:6px;background:#0c0710}
+.fam-line b{display:block;color:#ffdd82;font-size:13px}
+.fam-line small{display:block;margin-top:3px;color:#e6d8e6;font-size:11px;line-height:1.35}
+
+/* ============ v58: извержение «БЕСПРЕДЕЛ!» ============ */
+
+.besp-burst{
+  position:fixed;z-index:130;inset:0;
+  display:grid;place-items:center;
+  pointer-events:none;overflow:hidden;
+}
+
+/* Вспышка из глубины — «жерло вулкана» снизу экрана */
+.besp-glow{
+  position:absolute;left:50%;bottom:-30vh;
+  width:120vw;height:90vh;
+  transform:translateX(-50%) scale(.3);
+  border-radius:50%;
+  background:radial-gradient(circle at 50% 70%,
+    #fff3c4 0%, #ffb43a 18%, #ff5722 38%, #c1123a 58%, transparent 74%);
+  opacity:0;
+}
+.besp-burst.run .besp-glow{animation:besp-erupt 1.5s cubic-bezier(.2,.9,.3,1) forwards}
+@keyframes besp-erupt{
+  0%  {opacity:0;  transform:translateX(-50%) scale(.25)}
+  22% {opacity:.95;transform:translateX(-50%) scale(1.05)}
+  55% {opacity:.55;transform:translateX(-50%) scale(1.25)}
+  100%{opacity:0;  transform:translateX(-50%) scale(1.5)}
+}
+
+/* Летящие вверх искры */
+.besp-embers{
+  position:absolute;inset:0;opacity:0;
+  background-image:
+    radial-gradient(3px 3px at 12% 90%,#ffd166,transparent),
+    radial-gradient(2px 2px at 27% 96%,#ff8a3d,transparent),
+    radial-gradient(4px 4px at 44% 88%,#fff0b8,transparent),
+    radial-gradient(2px 2px at 61% 94%,#ff6b35,transparent),
+    radial-gradient(3px 3px at 78% 91%,#ffd166,transparent),
+    radial-gradient(2px 2px at 90% 97%,#ffa62b,transparent);
+}
+.besp-burst.run .besp-embers{animation:besp-embers 1.9s ease-out forwards}
+@keyframes besp-embers{
+  0%  {opacity:0;  transform:translateY(10vh) scale(1)}
+  25% {opacity:1}
+  100%{opacity:0;  transform:translateY(-70vh) scale(1.6)}
+}
+
+/* Надпись поднимается снизу, буквы по очереди */
+.besp-word{
+  position:relative;z-index:2;
+  display:flex;gap:.02em;
+  font-family:'Russo One',Impact,sans-serif;
+  font-size:clamp(38px,11vw,132px);
+  line-height:1;letter-spacing:.02em;
+  color:#ffdf5e;
+  text-shadow:0 4px 0 #a01028, 0 8px 26px #000, 0 0 44px #ff6b35;
+}
+.besp-word span{
+  display:inline-block;opacity:0;
+  transform:translateY(90px) rotate(-14deg) scale(.6);
+}
+.besp-burst.run .besp-word span{animation:besp-letter .62s cubic-bezier(.18,1.5,.4,1) forwards}
+@keyframes besp-letter{
+  0%  {opacity:0;transform:translateY(90px) rotate(-14deg) scale(.6)}
+  65% {opacity:1;transform:translateY(-10px) rotate(3deg)  scale(1.14)}
+  100%{opacity:1;transform:translateY(0)     rotate(0)     scale(1)}
+}
+/* Мегабеспредел — холоднее и злее */
+.besp-burst.is-mega .besp-glow{
+  background:radial-gradient(circle at 50% 70%,
+    #fff 0%, #b5f0ff 16%, #7a4dff 38%, #4a0f7a 60%, transparent 76%);
+}
+.besp-burst.is-mega .besp-word{
+  color:#e9d5ff;
+  text-shadow:0 4px 0 #4a0f7a, 0 8px 26px #000, 0 0 48px #9d6bff;
+  font-size:clamp(28px,8vw,104px);
+}
+
+/* Тряска стола */
+.board-shell.quake{animation:besp-quake .82s cubic-bezier(.36,.07,.19,.97) both}
+@keyframes besp-quake{
+  10%,90%{transform:translate3d(-3px,1px,0) rotate(-.18deg)}
+  20%,80%{transform:translate3d(6px,-2px,0) rotate(.28deg)}
+  30%,50%,70%{transform:translate3d(-9px,2px,0) rotate(-.36deg)}
+  40%,60%{transform:translate3d(9px,-2px,0) rotate(.36deg)}
+}
+
+/* Окно Беспредела влетает, а не выскакивает мгновенно */
+#event-modal:not(.hidden) .event-card{animation:besp-card .45s cubic-bezier(.2,1.3,.4,1) both}
+@keyframes besp-card{
+  0%  {opacity:0;transform:translateY(38px) scale(.9)}
+  100%{opacity:1;transform:none}
+}
+
+@media (prefers-reduced-motion:reduce){
+  .besp-burst.run .besp-glow,.besp-burst.run .besp-embers,
+  .besp-burst.run .besp-word span,.board-shell.quake{animation-duration:.01ms!important}
+}

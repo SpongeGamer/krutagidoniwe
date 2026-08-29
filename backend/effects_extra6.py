@@ -85,7 +85,8 @@ def _fam_fatboy(game, player, card, **kw):
 @defense("fam_fatboy")
 def _def_fatboy(game, defender, attacker, card):
     """Можешь взять все «Палочки» из своей стопки сброса на руку."""
-    sticks = [cid for cid in defender.discard if "Палочка" in game.cards[cid].name]
+    from .game import is_stick
+    sticks = [cid for cid in defender.discard if is_stick(game.cards[cid].name)]
     if not sticks:
         return
     for cid in sticks:
