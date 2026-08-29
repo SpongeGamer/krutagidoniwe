@@ -215,7 +215,7 @@ function playVisualMotion(motion,event){
   }
 }
 /* ---------- Счётчики стопок и диагностика (v43) ---------- */
-const BUILD_TAG='v66';
+const BUILD_TAG='v67';
 function setPileCounts(me){
   const d=$('self-deck-count'),c=$('self-discard-count');
   if(d)d.textContent=(me&&Number.isFinite(me.deck_count))?me.deck_count:0;
@@ -440,6 +440,16 @@ function buyTarget(playerId){
   if(playerId===myId&&document.getElementById('self-discard-pile'))return '#self-discard-pile';
   return `.opp-card[data-player-id="${CSS.escape(playerId)}"] .familiar-card`;
 }
+/* Нужна ли карте цель. Раньше искали только слово «выбранн» — из-за этого
+   «Повелитель шкурок» («выбери правого или левого врага») бил молча. */
+const NO_TARGET_IDS=new Set(['leg_minigun','leg_necrorot','fam_weaboo','leg_hemor']);
+function cardNeedsTarget(card){
+  if(!card)return false;
+  if(NO_TARGET_IDS.has(card.id))return false;
+  const t=(card.text||'').toLowerCase();
+  if(/кажд(ый|ому|ого) (колдун|враг)/.test(t))return false;   // бьёт по всем
+  return /выбранн|выбери|левому|правому|левого|правого/.test(t);
+}
 function escapeHtml(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function cardEl(card,onClick){const el=document.createElement('article');el.className='card'+(onClick?' is-actionable':'');el.dataset.cardId=card.id;el.title=`${card.name}\n${card.text||''}`;const img=document.createElement('img');img.className='cart-img';img.alt=card.name;img.loading='lazy';img.onload=()=>el.classList.add('has-image');attachCardImage(img,card.id,()=>{img.remove();el.classList.remove('has-image')});const info=document.createElement('div');info.className='card-info';info.innerHTML=`<div class="cname">${escapeHtml(card.name)}</div><div class="ctext">${escapeHtml((card.text||'').slice(0,128))}</div><div class="cfooter"><span class="cost">◉ ${card.cost}</span><span class="power">⚡ +${card.power}</span></div>`;el._cardData=card;const zoom=document.createElement('button');zoom.className='card-zoom';zoom.type='button';zoom.textContent='⌕';zoom.title='Открыть карту';zoom.onclick=(event)=>{event.stopPropagation();showCard(card)};el.append(img,info,zoom);if(onClick)el.onclick=onClick;return el}
 function playerEl(p,isMe,isTurn,seat){
@@ -493,9 +503,9 @@ function renderEvent(event){
     art.innerHTML='<img alt="">';
     attachCardImage(art.querySelector('img'),event.id,()=>{art.classList.add('hidden')});
   }else{art.classList.add('hidden');art.innerHTML=''}
+  // Кто получил жетон — уже написано в заголовке, дублировать не нужно.
   const who=$('event-owner');
-  if(isToken&&event.owner){who.classList.remove('hidden');who.textContent=(event.owner_id===myId?'Ты получаешь':`${event.owner} получает`)+' этот жетон'}
-  else who.classList.add('hidden');
+  if(who)who.classList.add('hidden');
   $('event-continue').textContent=isToken?'Понятно →':'Показать эффект →';
   $('event-continue').disabled=false;
   // Беспредел и Мегабеспредел объявляем громко: вспышка, тряска, надпись.
@@ -522,9 +532,9 @@ function renderEvent(event){
 function renderDecision(decision){const modal=$('decision-modal');if(!decision||decision.waiting_for){modal.classList.add('hidden');return}$('decision-title').textContent=decision.title||'Выбери вариант';$('decision-text').textContent=decision.text||'';$('decision-revealed').replaceChildren(...(decision.revealed_cards||[]).map(card=>cardEl(card,null)));$('decision-options').replaceChildren(...(decision.options||[]).map(option=>{const button=document.createElement('button');button.className='target-button';button.innerHTML=`<b>${escapeHtml(option.label)}</b>${option.detail?`<small>${escapeHtml(option.detail)}</small>`:''}`;button.onclick=()=>{playSound('click');ws.send(JSON.stringify({action:'resolve_decision',option_id:option.id}))};return button}));modal.classList.remove('hidden')}
 function buyCard(cardId){playSound('click');ws.send(JSON.stringify({action:'buy_card',card_id:cardId}))}
 function playCard(card){if(card.id==='spec_wild'){$('wild-modal').classList.remove('hidden');return}if(card.has_attack){pendingAttackChoice=card;$('attack-card-name').textContent=card.name;$('attack-modal').classList.remove('hidden');return}sendPlay(card,{})}
-function playAttackNow(card){if(card.text&&card.text.toLowerCase().includes('выбранн'))openTargetModal(card);else sendPlay(card,{})}
+function playAttackNow(card){if(cardNeedsTarget(card))openTargetModal(card);else sendPlay(card,{})}
 function deferredAttackButton(card,myTurn){const b=document.createElement('button');b.className='deferred-attack';b.disabled=!myTurn;b.innerHTML=`⚔ Атаковать: <b>${escapeHtml(card.name)}</b>`;b.onclick=()=>activateDeferredAttack(card);return b}
-function activateDeferredAttack(card){deferredAttackMode=true;if(card.text&&card.text.toLowerCase().includes('выбранн'))openTargetModal(card);else sendAttackActivation(card,{})}
+function activateDeferredAttack(card){deferredAttackMode=true;if(cardNeedsTarget(card))openTargetModal(card);else sendAttackActivation(card,{})}
 function openTargetModal(card){pendingTargetCard=card;$('target-card-name').textContent=card.name;const selfAllowed=card.id==='start_syrpal'||card.id==='start_hrenal';const targets=lastState.players.filter(p=>selfAllowed||p.id!==myId);$('target-list').replaceChildren(...targets.map(p=>{const b=document.createElement('button');b.className='target-button';b.innerHTML=`<b>${escapeHtml(p.name)}${p.id===myId?' · ты':''}</b><small>♥ ${p.life}/${p.max_life} · ☠ ЖДК ${p.death_tokens}</small>`;b.onclick=()=>{if(permanentActivationCard){sendPermanentActivation(permanentActivationCard,{target_id:p.id});permanentActivationCard=null}else if(deferredAttackMode){sendAttackActivation(card,{target_id:p.id});deferredAttackMode=false}else{sendPlay(card,wildTargetMode?{choice:'steal',target_id:p.id}:{target_id:p.id})}wildTargetMode=false;closeTargetModal()};return b}));$('target-modal').classList.remove('hidden')}
 function closeTargetModal(){$('target-modal').classList.add('hidden');pendingTargetCard=null}
 function sendPlay(card,params){playSound('card');ws.send(JSON.stringify({action:'play_card',card_id:card.id,params}))}

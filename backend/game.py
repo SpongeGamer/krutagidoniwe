@@ -134,6 +134,7 @@ class GameState:
         self.pending_event: Optional[dict] = None
         self._pending_event_card: Optional[Card] = None
         self._event_sequence = 0
+        self.event_queue: list[dict] = []
         self._refilling_markets = False
         # Универсальная пауза движка: игрок должен выбрать карту/цель/вариант.
         # Callback живёт только в памяти текущей комнаты, что подходит модели без БД.
@@ -573,12 +574,18 @@ class GameState:
         # Показ жетона ЖДК — просто информационное окно, карты за ним нет.
         if not self._pending_event_card:
             self.pending_event = None
+            if self.event_queue:                 # показываем следующий жетон
+                self.pending_event = self.event_queue.pop(0)
+                return {"ok": True}
             self._resume_market_refill()
             return {"ok": True}
         card = self._pending_event_card
         self.pending_event = None
         self._pending_event_card = None
         self._resolve_besp(card)
+        if not self.pending_event and self.event_queue:
+            self.pending_event = self.event_queue.pop(0)
+            return {"ok": True}
         self._resume_market_refill()
         return {"ok": True}
 
@@ -718,9 +725,15 @@ class GameState:
             effective_cost = max(0, effective_cost - 1)
         if card_id in self.legend_market:
             effective_cost = max(0, effective_cost - getattr(player, "legend_discount_turn", 0))
-        if effective_cost > player.power_available:
-            return {"error": "Не хватает мощи"}
-        player.power_available -= effective_cost
+        if effective_cost > player.power_available + player.chipsines:
+            return {"error": "Не хватает мощи и чипсин"}
+        # Сначала тратим мощь, недостающее добираем чипсинами (1 к 1).
+        from_power = min(effective_cost, player.power_available)
+        from_chips = effective_cost - from_power
+        player.power_available -= from_power
+        if from_chips:
+            player.chipsines -= from_chips
+            self.log(f"{player.name}: доплачивает {from_chips} чипсин(ы) за «{card.name}»")
         market_chip_bonus = self.market_chips.pop(card_id, 0)
         if card_id in self.market:
             self.market.remove(card_id)
@@ -741,9 +754,14 @@ class GameState:
         if self.wild_magic_remaining <= 0:
             return {"error": "Шальная магия закончилась"}
         wild_card = next(c for c in self.cards.values() if c.type == WILD_MAGIC_TYPE)
-        if wild_card.cost > player.power_available:
-            return {"error": "Не хватает мощи"}
-        player.power_available -= wild_card.cost
+        if wild_card.cost > player.power_available + player.chipsines:
+            return {"error": "Не хватает мощи и чипсин"}
+        from_power = min(wild_card.cost, player.power_available)
+        from_chips = wild_card.cost - from_power
+        player.power_available -= from_power
+        if from_chips:
+            player.chipsines -= from_chips
+            self.log(f"{player.name}: доплачивает {from_chips} чипсин(ы) за Шальную магию")
         self.wild_magic_remaining -= 1
         self.receive_card(player, wild_card.id)
         self.log(f"{player.name}: покупает Шальную магию за {wild_card.cost} мощи "
@@ -764,9 +782,14 @@ class GameState:
         # Свойство «Фамильяры» даёт три карты — какую покупать, решает игрок.
         chosen_id = card_id if card_id in available else available[0]
         card = self.cards[chosen_id]
-        if card.cost > player.power_available:
-            return {"error": "Не хватает мощи (нужно 6)"}
-        player.power_available -= card.cost
+        if card.cost > player.power_available + player.chipsines:
+            return {"error": "Не хватает мощи и чипсин (нужно 6)"}
+        from_power = min(card.cost, player.power_available)
+        from_chips = card.cost - from_power
+        player.power_available -= from_power
+        if from_chips:
+            player.chipsines -= from_chips
+            self.log(f"{player.name}: доплачивает {from_chips} чипсин(ы) за фамильяра")
         player.bought_familiars.append(chosen_id)
         player.familiar_bought = True
         self.receive_card(player, card.id)
@@ -943,13 +966,15 @@ class GameState:
                         self._advance_attack()
                         return
                 self._apply_attack_damage(source, target)
-            self.request_decision(
-                target,
-                f"Атака: {attack['card_name']}",
-                f"{source.name} атакует тебя на {amount} урона. Использовать защиту?", 
-                options,
-                choose_defense,
-            )
+            card_obj = self.cards.get(attack.get("card_id"))
+            is_besp = bool(card_obj and card_obj.type in ("Беспредел", "Мегабеспредел"))
+            if is_besp:
+                title = f"{attack['card_name']} бьёт!"
+                text = f"Беспредел наносит тебе {amount} урона. Использовать защиту?"
+            else:
+                title = f"Атака: {attack['card_name']}"
+                text = f"{source.name} атакует тебя на {amount} урона. Использовать защиту?"
+            self.request_decision(target, title, text, options, choose_defense)
         else:
             self._apply_attack_damage(source, target)
 
@@ -1168,7 +1193,7 @@ class GameState:
             self.log(f"{player.name} получает жетон дохлого колдуна: «{tok_name}». {tok_text}")
             # Показываем жетон крупно: игрок должен видеть, что именно ему выпало.
             self._event_sequence = getattr(self, "_event_sequence", 0) + 1
-            self.pending_event = {
+            token_event = {
                 "id": token_id,
                 "name": tok_name,
                 "seq": self._event_sequence,
@@ -1177,7 +1202,13 @@ class GameState:
                 "owner_id": player.id,
                 "owner": player.name,
             }
-            self._pending_event_card = None
+            if self.pending_event:
+                # Окно уже занято (умер кто-то ещё) — встаём в очередь,
+                # иначе второй жетон никто не увидит.
+                self.event_queue.append(token_event)
+            else:
+                self.pending_event = token_event
+                self._pending_event_card = None
         player.life = START_LIFE if not player.is_loshara else LOSHARA_MAX_LIFE
         if token_id:
             self._resolve_death_token(player, token_id, killer)
@@ -1265,10 +1296,10 @@ class GameState:
             weak_count = sum(1 for cid in pool if self.cards[cid].type == WEAK_STICK_TYPE)
             if "dk_16" in p.death_tokens and "leg_viagrus" not in pool:
                 vp -= weak_count
-                add_step("Жетон dk_16: палочки вдвойне", -weak_count, "bad")
+                add_step(f"Жетон «{self.zhdk.get('dk_16',{}).get('name','Вялая смерть')}»: палочки вдвойне", -weak_count, "bad")
             if "dk_4" in p.death_tokens and p.is_loshara:
                 vp -= 5
-                add_step("Жетон dk_4: лошара вдвойне", -5, "bad")
+                add_step(f"Жетон «{self.zhdk.get('dk_4',{}).get('name','Лошара!')}»: штраф удвоен", -5, "bad")
             # Два сапога взаимно уничтожаются в конце игры вместе со штрафами.
             if "dk_13" in p.death_tokens and "dk_14" in p.death_tokens:
                 _pair = -(self.zhdk["dk_13"].get("vp_penalty", -8) + self.zhdk["dk_14"].get("vp_penalty", -8))

@@ -263,7 +263,10 @@ class Room:
                 card = game.cards[cid]
                 params = {}
                 enemies = [e for e in game.enemies_of(active) if e.is_alive()]
-                if (card.has_attack or "выбранн" in (card.full_text or "").lower()) and enemies:
+                text_low = (card.full_text or "").lower()
+                wants_target = any(w in text_low for w in
+                                   ("выбранн", "выбери", "левого", "правого", "левому", "правому"))
+                if (card.has_attack or wants_target) and enemies:
                     params["target_id"] = self.pick_bot_target(active, enemies).id
                     params["target_ids"] = [e.id for e in enemies]
                 game.play_card(active, cid, **params)

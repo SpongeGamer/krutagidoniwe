@@ -486,3 +486,57 @@ def test_two_bespredels_do_not_hang_market():
     assert not game.pending_event, "событие не закрылось"
     assert not game._refilling_markets, "пополнение рынка зависло"
     assert len(game.market) == 5, f"рынок недозаполнен: {len(game.market)}"
+
+
+def test_buy_with_chipsines():
+    """Чипсины доплачивают за покупку: 1 чипсина = 1 мощь."""
+    game = GameState(["Я", "Враг"], seed=3)
+    me = game.active_player
+    me.power_available = 5
+    me.chipsines = 12
+
+    legends = [c for c in game.legend_market if game.cards[c].cost >= 8]
+    assert legends, "нужна дорогая легенда для проверки"
+    cid = legends[0]
+    cost = game.cards[cid].cost
+
+    assert not game.buy_card(me, cid).get("error"), "покупка за мощь+чипсины отклонена"
+    assert me.power_available == 0, "мощь должна списаться первой"
+    assert me.chipsines == 12 - (cost - 5), "чипсины списаны неверно"
+
+
+def test_two_boots_pair_cancels_penalty():
+    """«Два сапога» у одного игрока взаимно уничтожаются."""
+    game = GameState(["Один", "Двое"], seed=1)
+    a, b = game.players
+    a.death_tokens = ["dk_13", "dk_14"]
+    b.death_tokens = ["dk_13"]
+    game._finish_game()
+    assert game.final_scores[a.id]["vp"] > game.final_scores[b.id]["vp"], \
+        "пара жетонов должна снять штрафы"
+
+
+def test_scoring_step_labels_are_human():
+    """В расшифровке очков нет технических id вроде dk_4."""
+    game = GameState(["Я", "Враг"], seed=1)
+    me = game.players[0]
+    me.death_tokens = ["dk_4", "dk_16"]
+    me.is_loshara = True
+    me.deck.append("spec_vyal")
+    game._finish_game()
+    for step in game.final_scores[me.id]["steps"]:
+        assert "dk_" not in step["label"], f"технический id в подписи: {step['label']}"
+
+
+def test_two_deaths_show_both_tokens():
+    """Если умерли двое подряд, показываются оба жетона, а не один."""
+    game = GameState(["A", "B", "C"], seed=3)
+    killer = game.players[2]
+    game.deal_damage(killer, game.players[0].id, 999, "тест", defendable=False)
+    first_owner = game.pending_event["owner"]
+    game.deal_damage(killer, game.players[1].id, 999, "тест", defendable=False)
+
+    assert game.event_queue, "второй жетон потерялся"
+    game.resolve_event()
+    assert game.pending_event, "второе окно не открылось"
+    assert game.pending_event["owner"] != first_owner, "показан тот же игрок"
