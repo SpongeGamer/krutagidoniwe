@@ -443,3 +443,46 @@ def test_bot_spreads_attacks():
     rnd.seed(11)
     hits2 = collections.Counter(room.pick_bot_target(bot, enemies).name for _ in range(200))
     assert hits2.most_common(1)[0][0] == enemies[0].name, "бот не добивает раненого"
+
+
+def test_events_have_unique_seq():
+    """У каждого события свой номер — иначе клиент не отличит два
+    одинаковых Беспредела подряд и второе окно не откроется."""
+    game = GameState(["Я", "Бот"], seed=3)
+    game.market = game.market[:2]
+    game.main_deck.extend(["besp_15", "besp_15"])
+    game._refilling_markets = True
+    game._resume_market_refill()
+
+    seqs = []
+    guard = 0
+    while game.pending_event and guard < 8:
+        guard += 1
+        seqs.append(game.pending_event.get("seq"))
+        game.resolve_event()
+        if game.pending_decision:
+            _auto_resolve(game)
+
+    assert len(seqs) >= 2, "два Беспредела должны показаться отдельно"
+    assert all(s is not None for s in seqs), "у события нет номера"
+    assert len(set(seqs)) == len(seqs), f"номера событий повторяются: {seqs}"
+
+
+def test_two_bespredels_do_not_hang_market():
+    """Два Беспредела подряд не оставляют рынок недозаполненным."""
+    game = GameState(["Я", "Бот", "Третий"], seed=3)
+    game.market = game.market[:2]
+    game.main_deck.extend(["besp_15", "besp_15"])
+    game._refilling_markets = True
+    game._resume_market_refill()
+
+    guard = 0
+    while (game.pending_event or game.pending_decision) and guard < 20:
+        guard += 1
+        if game.pending_event:
+            game.resolve_event()
+        _auto_resolve(game)
+
+    assert not game.pending_event, "событие не закрылось"
+    assert not game._refilling_markets, "пополнение рынка зависло"
+    assert len(game.market) == 5, f"рынок недозаполнен: {len(game.market)}"

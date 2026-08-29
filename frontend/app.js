@@ -215,7 +215,7 @@ function playVisualMotion(motion,event){
   }
 }
 /* ---------- Счётчики стопок и диагностика (v43) ---------- */
-const BUILD_TAG='v65';
+const BUILD_TAG='v66';
 function setPileCounts(me){
   const d=$('self-deck-count'),c=$('self-discard-count');
   if(d)d.textContent=(me&&Number.isFinite(me.deck_count))?me.deck_count:0;
@@ -500,13 +500,23 @@ function renderEvent(event){
   $('event-continue').disabled=false;
   // Беспредел и Мегабеспредел объявляем громко: вспышка, тряска, надпись.
   const kind=(event.type||'');
-  if(!isToken&&/еспредел/i.test(kind)&&lastBurstKey!==(kind+'|'+(event.name||''))){
-    lastBurstKey=kind+'|'+(event.name||'');
+  const isBesp=!isToken&&/еспредел/i.test(kind);
+  // Ключ включает id карты и порядковый номер события: два одинаковых
+  // Беспределa подряд больше не считаются «тем же самым».
+  const burstKey=isBesp?`${kind}|${event.id||''}|${event.seq||lastToastSequence||''}`:'';
+  if(isBesp&&burstKey!==lastBurstKey){
+    lastBurstKey=burstKey;
     playBespredelBurst(/Мега/i.test(kind));
-    setTimeout(()=>modal.classList.remove('hidden'),3000);
+    clearTimeout(renderEvent._t);
+    renderEvent._t=setTimeout(()=>{
+      // Показываем окно, только если событие ещё актуально.
+      if(lastState&&lastState.pending_event)modal.classList.remove('hidden');
+    },3000);
     return;
   }
-  if(isToken||!/еспредел/i.test(kind))lastBurstKey='';
+  if(!isBesp)lastBurstKey='';
+  // Страховка: окно обязано открыться, даже если анимация не сработала.
+  clearTimeout(renderEvent._t);
   modal.classList.remove('hidden');
 }
 function renderDecision(decision){const modal=$('decision-modal');if(!decision||decision.waiting_for){modal.classList.add('hidden');return}$('decision-title').textContent=decision.title||'Выбери вариант';$('decision-text').textContent=decision.text||'';$('decision-revealed').replaceChildren(...(decision.revealed_cards||[]).map(card=>cardEl(card,null)));$('decision-options').replaceChildren(...(decision.options||[]).map(option=>{const button=document.createElement('button');button.className='target-button';button.innerHTML=`<b>${escapeHtml(option.label)}</b>${option.detail?`<small>${escapeHtml(option.detail)}</small>`:''}`;button.onclick=()=>{playSound('click');ws.send(JSON.stringify({action:'resolve_decision',option_id:option.id}))};return button}));modal.classList.remove('hidden')}

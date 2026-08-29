@@ -133,6 +133,7 @@ class GameState:
         # Карта Беспредела/Мегабеспредела показана всем до выполнения эффекта.
         self.pending_event: Optional[dict] = None
         self._pending_event_card: Optional[Card] = None
+        self._event_sequence = 0
         self._refilling_markets = False
         # Универсальная пауза движка: игрок должен выбрать карту/цель/вариант.
         # Callback живёт только в памяти текущей комнаты, что подходит модели без БД.
@@ -553,11 +554,13 @@ class GameState:
             self._refilling_markets = False
 
     def _queue_event(self, card: Card):
+        self._event_sequence = getattr(self, "_event_sequence", 0) + 1
         self.pending_event = {
             "id": card.id,
             "name": card.name,
             "type": card.type,
             "text": card.full_text,
+            "seq": self._event_sequence,
         }
         self._pending_event_card = card
         self.log(f"{card.type.upper()} показан: {card.full_text}")
@@ -1164,9 +1167,11 @@ class GameState:
             tok_text = tok.get("effect_text", "")
             self.log(f"{player.name} получает жетон дохлого колдуна: «{tok_name}». {tok_text}")
             # Показываем жетон крупно: игрок должен видеть, что именно ему выпало.
+            self._event_sequence = getattr(self, "_event_sequence", 0) + 1
             self.pending_event = {
                 "id": token_id,
                 "name": tok_name,
+                "seq": self._event_sequence,
                 "type": "Жетон дохлого колдуна",
                 "text": tok_text,
                 "owner_id": player.id,
