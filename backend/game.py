@@ -86,6 +86,7 @@ class Player:
     received_this_turn: list = field(default_factory=list)
     no_defense_turn: bool = False
     hand_limit_bonus: int = 0
+    bought_familiars: list = field(default_factory=list)  # какие фамильяры уже куплены
     borrowed_cards: list = field(default_factory=list)  # (card_id, владелец) — Шальная магия
     next_attack_unavoidable: bool = False   # «Бензопила»: следующей атаке нельзя помешать
     brotality_active: bool = False          # «Браталити»: убитый не получит жетон ЖДК
@@ -341,6 +342,12 @@ class GameState:
         """
         card = self.cards[card_id]
         player.received_this_turn.append(card_id)
+        # Значок чипсины в углу карты: выдаётся сразу при получении карты.
+        # Раньше он срабатывал только при розыгрыше — покупка чипсину не давала.
+        if card.chipsina_symbol:
+            player.chipsines += card.chipsina_symbol
+            self.log(f"{player.name}: значок чипсины на «{card.name}» — "
+                     f"+{card.chipsina_symbol} (всего {player.chipsines})")
         if destination == "hand":
             player.hand.append(card_id)
         elif destination == "deck_top":
@@ -631,9 +638,7 @@ class GameState:
         # Значок чипсины в базе обозначает мгновенное получение чипсины.
         # У карт, где чипсина уже описана условием в тексте (например Пейотка),
         # это обрабатывает их отдельный эффект, чтобы не начислять дважды.
-        if card.chipsina_symbol and "получи" not in (card.full_text or "").lower():
-            player.chipsines += card.chipsina_symbol
-            self.log(f"{player.name}: значок чипсины на «{card.name}» — +{card.chipsina_symbol}")
+        # Значок чипсины уже выдан при получении карты (см. receive_card).
 
         # Атака не обязана срабатывать в момент розыгрыша: игрок может получить
         # мощь сейчас, а применить её позднее в тот же ход.
@@ -744,15 +749,22 @@ class GameState:
         self.emit_visual_event("buy", player, [wild_card.id], "market", "discard")
         return {"ok": True}
 
-    def buy_familiar(self, player: Player) -> dict:
+    def buy_familiar(self, player: Player, card_id: Optional[str] = None) -> dict:
         if player.id != self.active_player.id:
             return {"error": "Сейчас не ваш ход"}
-        if not player.familiar_card_id or player.familiar_bought:
-            return {"error": "Нет фамильяра для покупки"}
-        card = self.cards[player.familiar_card_id]
+        available = [c for c in (player.familiar_card_ids or [])
+                     if c not in player.bought_familiars]
+        if not available and player.familiar_card_id and not player.familiar_bought:
+            available = [player.familiar_card_id]
+        if not available:
+            return {"error": "Все твои фамильяры уже куплены"}
+        # Свойство «Фамильяры» даёт три карты — какую покупать, решает игрок.
+        chosen_id = card_id if card_id in available else available[0]
+        card = self.cards[chosen_id]
         if card.cost > player.power_available:
             return {"error": "Не хватает мощи (нужно 6)"}
         player.power_available -= card.cost
+        player.bought_familiars.append(chosen_id)
         player.familiar_bought = True
         self.receive_card(player, card.id)
         self.log(f"{player.name}: покупает фамильяра «{card.name}» за {card.cost} мощи "
@@ -1317,6 +1329,7 @@ class GameState:
                 "familiar":  card_brief(p.familiar_card_id) if p.familiar_card_id else None,
                 "familiars": [card_brief(cid) for cid in p.familiar_card_ids],
                 "familiar_bought": p.familiar_bought,
+                "bought_familiars": list(p.bought_familiars),
             }
             if viewer_id == p.id:
                 out["hand"] = [card_brief(c) for c in p.hand]

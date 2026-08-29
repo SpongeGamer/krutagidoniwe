@@ -392,3 +392,54 @@ def test_dirty_stick_gives_power():
 
     # +1 мощь самой карты и +1 от «Грязной палки»
     assert me.power_available >= 2, f"ожидалось минимум 2 мощи, получено {me.power_available}"
+
+
+def test_chipsina_symbol_on_purchase():
+    """Значок чипсины на карте выдаёт чипсину при ПОКУПКЕ."""
+    game = GameState(["Я", "Враг"], seed=3)
+    me = game.active_player
+    me.power_available = 20
+    before = me.chipsines
+    game.market.append("beast_peyot")          # Пейотка со значком чипсины
+    game.buy_card(me, "beast_peyot")
+    assert me.chipsines == before + 1, "покупка карты со значком должна давать чипсину"
+
+
+def test_familiar_choice_on_buy():
+    """Свойство «Фамильяры»: покупаем конкретного, а не первого по списку."""
+    game = GameState(["Я", "Враг"], seed=3)
+    me = game.active_player
+    me.familiar_card_ids = ["fam_benz", "fam_weaboo", "fam_jester"]
+    me.familiar_card_id = "fam_benz"
+    me.power_available = 30
+
+    assert not game.buy_familiar(me, "fam_jester").get("error")
+    assert "fam_jester" in me.bought_familiars, "куплен не тот фамильяр"
+    assert "fam_jester" in me.discard
+
+    # можно купить и остальных
+    assert not game.buy_familiar(me, "fam_weaboo").get("error")
+    assert me.bought_familiars == ["fam_jester", "fam_weaboo"]
+
+
+def test_bot_spreads_attacks():
+    """Бот не долбит одного и того же игрока каждый ход."""
+    import collections
+    import random as rnd
+    from backend.server import Room
+
+    room = Room("t")
+    game = GameState(["Игрок", "Бот 1", "Бот 2", "Бот 3"], seed=1)
+    bot = game.players[1]
+    enemies = [p for p in game.players if p is not bot]
+
+    rnd.seed(11)
+    hits = collections.Counter(room.pick_bot_target(bot, enemies).name for _ in range(300))
+    assert len(hits) >= 2, "бот бьёт только одну цель"
+    assert max(hits.values()) / 300 < 0.6, f"перекос по целям: {hits}"
+
+    # раненого добивает
+    enemies[0].life = 3
+    rnd.seed(11)
+    hits2 = collections.Counter(room.pick_bot_target(bot, enemies).name for _ in range(200))
+    assert hits2.most_common(1)[0][0] == enemies[0].name, "бот не добивает раненого"

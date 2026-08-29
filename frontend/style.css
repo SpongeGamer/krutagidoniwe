@@ -716,3 +716,14 @@ input { user-select:text; -webkit-user-select:text; }
   color:#ffdd82;font-size:12px;font-weight:900;
 }
 .detail-line.total b{color:#ffd34e}
+
+/* ============ v65: счётчик оставшихся фамильяров ============ */
+.fam-left{
+  position:absolute;left:-6px;top:-6px;
+  display:grid;place-items:center;
+  min-width:20px;height:20px;padding:0 5px;
+  border-radius:99px;
+  color:#2b1705;background:#9dff87;
+  font-size:11px;font-weight:900;
+  box-shadow:0 2px 6px #000a;
+}

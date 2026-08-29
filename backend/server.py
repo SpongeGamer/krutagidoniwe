@@ -173,6 +173,39 @@ class Room:
                 return True
         return False
 
+    def pick_bot_target(self, bot, enemies):
+        """Кого бот бьёт.
+
+        Раньше всегда брался enemies[0] — то есть один и тот же игрок
+        получал все атаки подряд. Теперь бот целится осмысленно:
+        добивает раненых, уважает лидера по очкам и иногда бьёт наугад.
+        """
+        if not enemies:
+            return None
+        if len(enemies) == 1:
+            return enemies[0]
+
+        # 20% ходов — случайная цель, чтобы бот не был предсказуемым.
+        if random.random() < 0.2:
+            return random.choice(enemies)
+
+        def threat(e):
+            score = 0
+            score += len(e.zone_in_play) * 2          # много постоянок — опасен
+            score += e.chipsines
+            score += 3 if e.controls_prize else 0     # держит приз — цель номер один
+            score -= e.life // 5                      # раненых добиваем охотнее
+            return score
+
+        # Кого можно убить прямо сейчас — того и бьём.
+        weakest = min(enemies, key=lambda e: e.life)
+        if weakest.life <= 6:
+            return weakest
+        # При равной угрозе выбираем случайного из лучших, иначе max()
+        # всегда возвращал первого в списке — то есть одного и того же игрока.
+        best = max(threat(e) for e in enemies)
+        return random.choice([e for e in enemies if threat(e) == best])
+
     async def run_bots(self):
         """Пошаговый тестовый ИИ: после каждого действия рассылает состояние.
         Поэтому человек видит карты, покупки и смену хода, а не только итог.
@@ -225,19 +258,22 @@ class Room:
                 continue
             # Одно действие бота за итерацию: его можно увидеть на столе.
             if active.hand:
-                cid = active.hand[0]
+                # Сначала карты без атаки — копим мощь, потом бьём.
+                cid = min(active.hand, key=lambda c: (game.cards[c].has_attack, -game.cards[c].power))
                 card = game.cards[cid]
                 params = {}
-                enemies = game.enemies_of(active)
+                enemies = [e for e in game.enemies_of(active) if e.is_alive()]
                 if (card.has_attack or "выбранн" in (card.full_text or "").lower()) and enemies:
-                    params["target_id"] = enemies[0].id
+                    params["target_id"] = self.pick_bot_target(active, enemies).id
+                    params["target_ids"] = [e.id for e in enemies]
                 game.play_card(active, cid, **params)
                 await self.broadcast()
                 await asyncio.sleep(1.1)
                 continue
             affordable = [cid for cid in game.market + game.legend_market if game.cards[cid].cost <= active.power_available]
             if affordable:
-                chosen = min(affordable, key=lambda cid: game.cards[cid].cost)
+                # Берём самое дорогое из доступного — оно обычно и сильнее.
+                chosen = max(affordable, key=lambda cid: (game.cards[cid].vp, game.cards[cid].cost))
                 game.buy_card(active, chosen)
                 game.emit_visual_event("buy", active, [chosen], "market", "discard")
                 await self.broadcast()
@@ -524,7 +560,7 @@ async def ws_endpoint(websocket: WebSocket, room_id: str):
             elif action == "buy_wild_magic":
                 result = room.game.buy_wild_magic(gp)
             elif action == "buy_familiar":
-                result = room.game.buy_familiar(gp)
+                result = room.game.buy_familiar(gp, msg.get("card_id"))
             elif action == "end_turn":
                 result = room.game.end_turn(gp)
 
