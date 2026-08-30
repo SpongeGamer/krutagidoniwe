@@ -175,18 +175,40 @@ def _leg_captain(game, player, card, **kw):
     revealed = [target.deck.pop() for _ in range(min(4, len(target.deck)))]
     if not revealed:
         return
-    options = [{"id": cid, "label": game.cards[cid].name} for cid in revealed]
+    options = [{"id": cid,
+                "label": game.cards[cid].name,
+                "detail": (game.cards[cid].full_text or "")[:110]} for cid in revealed]
 
     def resolve(choice: str):
-        if choice in revealed:
-            chosen = game.cards[choice]
-            game.log(f"{player.name}: играет «{chosen.name}» из колоды {target.name}")
-            game.apply_card_effect(player, chosen, **kw)
+        if choice not in revealed:
+            for cid in revealed:
+                target.discard.append(cid)
+            return
+        chosen = game.cards[choice]
+        game.log(f"{player.name}: играет «{chosen.name}» из колоды {target.name}")
+        # Остальные три уходят в сброс владельца сразу.
         for cid in revealed:
-            target.discard.append(cid)
+            if cid != choice:
+                target.discard.append(cid)
+        # «В этот ход считается, что ты контролируешь сыгранную карту»:
+        # карта ложится на стол игрока и работает весь ход, а в end_turn
+        # возвращается в сброс владельца (механика borrowed_cards).
+        # Раньше её просто сбрасывали вместе с остальными — игрок видел,
+        # что все 4 карты исчезли, и ничего не получал.
+        player.in_play_this_turn.append(choice)
+        player.power_available += chosen.power
+        if chosen.power:
+            game.log(f"{player.name}: «{chosen.name}» +{chosen.power} мощи "
+                     f"(всего {player.power_available})")
+        game.emit_visual_event("play", player, [choice], "deck", "table")
+        player.borrowed_cards.append((choice, target.id))
+        # Карта играется ПОЛНОСТЬЮ: с атакой и выбором цели, а не только мощью.
+        kw_clean = {k: v for k, v in kw.items() if k not in ("target_id", "use_attack")}
+        game.play_foreign_card(player, chosen, **kw_clean)
 
     game.request_decision(
-        player, card.name, f"Карты из колоды {target.name}", options, resolve,
+        player, card.name, f"Карты из колоды {target.name} — выбери, какую сыграть",
+        options, resolve,
         revealed_cards=[game.card_public(c) for c in revealed],
     )
 
@@ -201,9 +223,36 @@ def _leg_epicvyal(game, player, card, **kw):
         return
 
     def on_hit(target, dead):
-        if dead:
-            game.give_weak_sticks(target, 3, "discard")
-            game.log(f"{target.name}: получает 3 вялые палочки")
+        if not dead:
+            return
+        # «Можешь дать ему 3 ИЛИ МЕНЬШЕ палочек» — сколько именно, решает игрок.
+        from_hand = player.hand.count("spec_vyal")
+        from_discard = player.discard.count("spec_vyal")
+        max_give = min(3, from_hand + from_discard + game.vyal_remaining)
+        if max_give <= 0:
+            return
+        options = [{"id": str(n), "label": f"Дать {n} палочк{'у' if n == 1 else 'и'}"}
+                   for n in range(1, max_give + 1)]
+        options.append({"id": "0", "label": "Не давать ничего"})
+
+        def resolve(choice: str):
+            n = int(choice)
+            if n <= 0:
+                return
+            left = n
+            # Сначала отдаём свои палочки: с руки, потом из сброса.
+            for zone in (player.hand, player.discard):
+                while left and "spec_vyal" in zone:
+                    zone.remove("spec_vyal")
+                    target.discard.append("spec_vyal")
+                    left -= 1
+            if left:
+                game.give_weak_sticks(target, left, "discard")
+            game.log(f"{target.name}: получает {n} вялых палочек от «{card.name}»")
+
+        game.request_decision(player, card.name,
+                              f"{target.name} подох. Сколько вялых палочек ему дать?",
+                              options, resolve)
 
     game.attack_target(player, card, target_id, 7, on_hit=on_hit)
 

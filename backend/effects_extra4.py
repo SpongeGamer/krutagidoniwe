@@ -216,13 +216,18 @@ def besp_15(game, player, card, **kw):
 
 @effect("besp_16")
 def besp_16(game, player, card, **kw):
-    living=[p for p in game.players if p.is_alive()]
-    if living:
-        lowest=min(p.life for p in living)
-        for target in living:
-            if target.life == lowest:
-                game.set_loshara(target, True)
-                target.life = 15
+    """Самый хилый становится лошарой и лечится до лошарного максимума."""
+    living = [p for p in game.players if p.is_alive()]
+    if not living:
+        return
+    lowest = min(p.life for p in living)
+    victims = [p for p in living if p.life == lowest]
+    names = ", ".join(p.name for p in victims)
+    game.log(f"{card.name}: самый хилый — {names} ({lowest} HP)")
+    for target in victims:
+        game.set_loshara(target, True)
+        target.life = target.max_life
+        game.log(f"{target.name}: становится лошарой и лечится до {target.life} HP")
 
 
 @effect("besp_17")
@@ -335,11 +340,24 @@ def mega_4(game, player, card, **kw):
 def mega_5(game, player, card, **kw):
     def destroy_top(target, dead):
         if not game.main_deck:
+            game.log(f"{card.name}: основная колода пуста — уничтожать нечего")
             return
         cid = game.main_deck.pop()
         destroyed = game.cards[cid]
         game.destroyed_pile.append(cid)
-        if destroyed.type == "Беспредел":
+        # Показываем, ЧТО вскрыли: раньше карта уничтожалась молча.
+        game.log(f"{target.name}: уничтожает верхнюю карту — «{destroyed.name}» ({destroyed.type})")
+        game.emit_visual_event("destroy", target, [cid], "deck", "destroyed")
+        is_besp = destroyed.type in ("Беспредел", "Мегабеспредел")
+        # Карта горит на экране у ВСЕХ: картинкой, названием и текстом.
+        game.announce_destroy(
+            cid,
+            reason=(f"{card.name} — это беспредел, {target.name} подыхает!"
+                    if is_besp else f"{card.name}: {target.name} сжигает верхнюю карту барахолки"),
+            victim=target,
+        )
+        if is_besp:
+            game.log(f"{target.name}: это беспредел — он подыхает!")
             game.deal_damage(player, target.id, target.life, card.name, defendable=False)
     game.declare_attack(player, card, all_players(game), 0, on_hit=destroy_top)
 

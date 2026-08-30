@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import random
+import re
 import uuid
 from dataclasses import dataclass, field
 from typing import Optional, Callable
@@ -125,6 +126,10 @@ class GameState:
         self.vyal_remaining = 0
         self.destroyed_pile: list[str] = []            # уничтоженные обычные
         self.destroyed_besp_pile: list[str] = []        # уничтоженные беспределы
+        # Лента уничтожений: клиент показывает КАЖДУЮ сгоревшую карту
+        # картинкой и текстом. Без неё игроки не понимали, что именно пропало.
+        self.destroy_reel: list[dict] = []
+        self._destroy_seq = 0
         self.undead_token_stack: list[str] = []          # доступные ЖДК
         self.prize_holder: Optional[str] = None
         self.final_scores: dict = {}
@@ -259,6 +264,29 @@ class GameState:
             "destination": destination,
         }
 
+    def announce_destroy(self, card_id: str, reason: str = "", victim: Optional[Player] = None):
+        """Показать всем, какая карта сгорела: картинка + текст + анимация.
+
+        Нужно Мегабеспределам: раньше карта уничтожалась молча, и игрок видел
+        только строчку в журнале, которую вытесняло следующее событие.
+        """
+        card = self.cards.get(card_id)
+        if not card:
+            return
+        self._destroy_seq += 1
+        self.destroy_reel.append({
+            "seq": self._destroy_seq,
+            "card_id": card_id,
+            "name": card.name,
+            "type": card.type,
+            "text": card.full_text or "",
+            "reason": reason,
+            "victim": victim.name if victim else "",
+            "victim_id": victim.id if victim else "",
+        })
+        # Держим только последние — старые уже отыграны у всех клиентов.
+        self.destroy_reel = self.destroy_reel[-6:]
+
     def get_player(self, pid: str) -> Optional[Player]:
         return next((p for p in self.players if p.id == pid), None)
 
@@ -294,13 +322,17 @@ class GameState:
             player.life = min(player.life, MAX_LIFE)
             self.log(f"{player.name}: снова нормальный колдун")
 
-    def destroy_from_zone(self, player: Player, card_id: str, zone: str) -> bool:
+    def destroy_from_zone(self, player: Player, card_id: str, zone: str,
+                          reason: str = "") -> bool:
         cards = getattr(player, zone, None)
         if not isinstance(cards, list) or card_id not in cards:
             return False
         cards.remove(card_id)
         self.destroyed_pile.append(card_id)
         self.log(f"{player.name}: уничтожает «{self.cards[card_id].name}»")
+        # Уничтожение видно всем: карта сгорает на экране.
+        self.announce_destroy(card_id, reason or f"{player.name} уничтожает карту",
+                              victim=player)
         return True
 
     def hand_limit(self, player: Player) -> int:
@@ -313,7 +345,12 @@ class GameState:
         if not player.deck and player.discard:
             player.deck = player.discard[:]
             player.discard = []
-            self.rng.shuffle(player.deck)
+            # Тасуем несколько раз и отдельным генератором: одиночный shuffle
+            # с общим rng давал заметные «слипшиеся» пачки только что купленных карт.
+            import random as _r
+            shuffler = _r.Random(self.rng.random())
+            for _ in range(3):
+                shuffler.shuffle(player.deck)
             self.log(f"{player.name}: колода пуста, сброс перемешан в новую колоду")
 
     def draw_cards(self, player: Player, n: int):
@@ -708,16 +745,100 @@ class GameState:
         from . import effects
         return effects.apply_activation(self, player, self.cards[card_id], **kwargs)
 
-    def apply_card_effect(self, player: Player, card: Card, **kwargs):
+    def apply_card_effect(self, player: Player, card: Card, add_power: bool = True, **kwargs):
         """Применить эффект карты card от лица player, не трогая руку/сброс
-        (используется, например, для Шальной магии, разыгрывающей чужую карту)."""
+        (используется, например, для Шальной магии, разыгрывающей чужую карту).
+
+        add_power=False, если мощь уже начислена вызывающей стороной:
+        Шальная магия начисляла её дважды (украл карту на 3 мощи — получил 6).
+        """
         from . import effects
         handler = effects.get_effect(card.id)
-        player.power_available += card.power
+        if add_power:
+            player.power_available += card.power
         if handler:
             handler(self, player, card, **kwargs)
 
-    def buy_card(self, player: Player, card_id: str) -> dict:
+    # Карты, которые бьют по площади или выбирают цель сами внутри эффекта.
+    NO_TARGET_CARDS = {"leg_minigun", "leg_necrorot", "fam_weaboo", "leg_hemor",
+                       "leg_rabbit", "leg_shitcher", "beast_kinky",
+                       "spell_dirtwind", "wiz_bandits", "wiz_sosok"}
+
+    def card_needs_target(self, card: Card) -> bool:
+        """Нужна ли карте одна конкретная цель.
+
+        Карты «каждому врагу» и Беспределы бьют по площади — спрашивать
+        цель у них нельзя, иначе игрок получит бессмысленное окно.
+        """
+        if card.id in self.NO_TARGET_CARDS:
+            return False
+        if card.type in ("Беспредел", "Мегабеспредел"):
+            return False
+        text = f"{card.attack_text or ''} {card.full_text or ''}".lower()
+        if re.search(r"кажд(ый|ому|ого|ые)\s+(колдун|враг)|всех врагов|все враги", text):
+            return False
+        return bool(re.search(r"выбранн|выбери|левому|правому|левого|правого", text))
+
+    def choose_enemy(self, player: Player, card: Card, callback: Callable,
+                     text: Optional[str] = None, allow_skip: bool = False):
+        """Спросить игрока, на кого направить эффект карты.
+
+        Окно показывается ВСЕГДА, даже когда враг остался один: игрок должен
+        видеть, кого он выбирает, а не гадать, сработала карта или нет.
+        """
+        enemies = [e for e in self.enemies_of(player) if e.is_alive()]
+        if not enemies:
+            self.log(f"«{card.name}»: живых врагов нет — выбирать некого")
+            return
+        options = [{"id": e.id, "label": e.name,
+                    "detail": f"♥ {e.life}/{e.max_life} · ЖДК {len(e.death_tokens)}"}
+                   for e in enemies]
+        if allow_skip:
+            options.append({"id": "skip", "label": "Пропустить"})
+
+        def resolve(choice: str):
+            if choice == "skip":
+                return
+            target = self.get_player(choice)
+            if target:
+                callback(target)
+
+        self.request_decision(player, card.name, text or "Выбери врага",
+                              options, resolve,
+                              revealed_cards=[self.card_public(card.id)])
+
+    def play_foreign_card(self, player: Player, card: Card, **kwargs):
+        """Разыграть чужую карту ПОЛНОСТЬЮ: и мощь, и атака с выбором цели.
+
+        Шальная магия и Капитан Бартоломяу раньше применяли эффект «как есть»:
+        карта с атакой просто давала мощь, потому что цель никто не спрашивал.
+        """
+        if kwargs.get("target_id") or not card.has_attack or not self.card_needs_target(card):
+            self.apply_card_effect(player, card, add_power=False, **kwargs)
+            return
+        enemies = [e for e in self.enemies_of(player) if e.is_alive()]
+        if not enemies:
+            self.apply_card_effect(player, card, add_power=False, **kwargs)
+            return
+        options = [{"id": e.id, "label": e.name,
+                    "detail": f"♥ {e.life}/{e.max_life} · ЖДК {len(e.death_tokens)}"}
+                   for e in enemies]
+
+        def choose(target_id: str):
+            # kwargs может уже содержать target_id/target_ids (например от бота).
+            # Выбор игрока главнее — перетираем, а не передаём дважды.
+            params = dict(kwargs)
+            params["target_id"] = target_id
+            params["target_ids"] = [e.id for e in enemies]
+            self.apply_card_effect(player, card, add_power=False, **params)
+
+        self.request_decision(
+            player, card.name,
+            f"«{card.name}» — атака. Выбери цель.",
+            options, choose, revealed_cards=[self.card_public(card.id)],
+        )
+
+    def buy_card(self, player: Player, card_id: str, use_chipsines: Optional[int] = None) -> dict:
         if player.id != self.active_player.id:
             return {"error": "Сейчас не ваш ход"}
         if self.pending_event or self.pending_attack or self.pending_decision:
@@ -730,15 +851,28 @@ class GameState:
             effective_cost = max(0, effective_cost - 1)
         if card_id in self.legend_market:
             effective_cost = max(0, effective_cost - getattr(player, "legend_discount_turn", 0))
-        if effective_cost > player.power_available + player.chipsines:
-            return {"error": "Не хватает мощи и чипсин"}
-        # Сначала тратим мощь, недостающее добираем чипсинами (1 к 1).
-        from_power = min(effective_cost, player.power_available)
-        from_chips = effective_cost - from_power
+        # Чипсинами доплачивают ТОЛЬКО за легенды и фамильяров.
+        # Обычные карты барахолки покупаются исключительно за мощь.
+        chips_allowed = card_id in self.legend_market or "Легенда" in card.types_for_matching
+        if not chips_allowed:
+            if effective_cost > player.power_available:
+                return {"error": "За эту карту чипсинами платить нельзя — не хватает мощи"}
+            from_chips = 0
+        else:
+            if effective_cost > player.power_available + player.chipsines:
+                return {"error": "Не хватает мощи и чипсин"}
+            if use_chipsines is None:
+                from_chips = max(0, effective_cost - player.power_available)
+            else:
+                from_chips = max(0, min(int(use_chipsines), effective_cost, player.chipsines))
+        from_power = effective_cost - from_chips
+        if from_power > player.power_available:
+            return {"error": "Не хватает мощи при таком раскладе"}
         player.power_available -= from_power
         if from_chips:
             player.chipsines -= from_chips
-            self.log(f"{player.name}: доплачивает {from_chips} чипсин(ы) за «{card.name}»")
+            self.log(f"{player.name}: платит {from_power} мощи + {from_chips} чипсин(ы) "
+                     f"за «{card.name}»")
         market_chip_bonus = self.market_chips.pop(card_id, 0)
         if card_id in self.market:
             self.market.remove(card_id)
@@ -759,14 +893,10 @@ class GameState:
         if self.wild_magic_remaining <= 0:
             return {"error": "Шальная магия закончилась"}
         wild_card = next(c for c in self.cards.values() if c.type == WILD_MAGIC_TYPE)
-        if wild_card.cost > player.power_available + player.chipsines:
-            return {"error": "Не хватает мощи и чипсин"}
-        from_power = min(wild_card.cost, player.power_available)
-        from_chips = wild_card.cost - from_power
-        player.power_available -= from_power
-        if from_chips:
-            player.chipsines -= from_chips
-            self.log(f"{player.name}: доплачивает {from_chips} чипсин(ы) за Шальную магию")
+        # За Шальную магию чипсинами платить нельзя — только мощь.
+        if wild_card.cost > player.power_available:
+            return {"error": "За Шальную магию чипсинами платить нельзя — не хватает мощи"}
+        player.power_available -= wild_card.cost
         self.wild_magic_remaining -= 1
         self.receive_card(player, wild_card.id)
         self.log(f"{player.name}: покупает Шальную магию за {wild_card.cost} мощи "
@@ -775,7 +905,8 @@ class GameState:
         self.emit_visual_event("buy", player, [wild_card.id], "market", "discard")
         return {"ok": True}
 
-    def buy_familiar(self, player: Player, card_id: Optional[str] = None) -> dict:
+    def buy_familiar(self, player: Player, card_id: Optional[str] = None,
+                      use_chipsines: Optional[int] = None) -> dict:
         if player.id != self.active_player.id:
             return {"error": "Сейчас не ваш ход"}
         available = [c for c in (player.familiar_card_ids or [])
@@ -789,12 +920,17 @@ class GameState:
         card = self.cards[chosen_id]
         if card.cost > player.power_available + player.chipsines:
             return {"error": "Не хватает мощи и чипсин (нужно 6)"}
-        from_power = min(card.cost, player.power_available)
-        from_chips = card.cost - from_power
+        if use_chipsines is None:
+            from_chips = max(0, card.cost - player.power_available)
+        else:
+            from_chips = max(0, min(int(use_chipsines), card.cost, player.chipsines))
+        from_power = card.cost - from_chips
+        if from_power > player.power_available:
+            return {"error": "Не хватает мощи при таком раскладе"}
         player.power_available -= from_power
         if from_chips:
             player.chipsines -= from_chips
-            self.log(f"{player.name}: доплачивает {from_chips} чипсин(ы) за фамильяра")
+            self.log(f"{player.name}: платит {from_power} мощи + {from_chips} чипсин(ы) за фамильяра")
         player.bought_familiars.append(chosen_id)
         player.familiar_bought = True
         self.receive_card(player, card.id)
@@ -808,6 +944,11 @@ class GameState:
             return {"error": "Сейчас не ваш ход"}
         if self.pending_event or self.pending_attack or self.pending_decision:
             return {"error": "Сначала завершите текущий выбор или атаку"}
+        # Владелец Главного приза получает чипсину в конце своего хода.
+        if player.controls_prize:
+            player.chipsines += 1
+            self.log(f"{player.name}: Главный приз приносит 1 чипсину "
+                     f"(всего {player.chipsines})")
         player.discard.extend(player.hand)
         player.hand = []
         # Карты, украденные Шальной магией, возвращаются владельцу в его сброс.
@@ -908,7 +1049,8 @@ class GameState:
         self._queue_attack(source, card, targets_with_damage, None, unavoidable, on_hit)
 
     def _queue_attack(self, source: Player, card: Card, targets, amount: Optional[int],
-                      unavoidable: bool, on_hit: Optional[Callable]):
+                      unavoidable: bool, on_hit: Optional[Callable],
+                      no_redirect: bool = False):
         if not targets:
             return
         entries = []
@@ -922,6 +1064,10 @@ class GameState:
             unavoidable = True
             source.next_attack_unavoidable = False
             self.log(f"{source.name}: этой атаки нельзя избежать")
+        # Часть карт прямо запрещает разворот атаки («Хахатальер Злорадник»).
+        text = f"{card.attack_text or ''} {card.full_text or ''}".lower()
+        if "нельзя перенаправить" in text:
+            no_redirect = True
         self.pending_attack = {
             "source_id": source.id,
             "card_id": card.id,
@@ -930,6 +1076,7 @@ class GameState:
             "index": 0,
             "unavoidable": unavoidable,
             "on_hit": on_hit,
+            "no_redirect": no_redirect,
         }
         self._advance_attack()
 
@@ -950,7 +1097,13 @@ class GameState:
             self._advance_attack()
             return
 
-        defenses = [] if target.no_defense_turn else [cid for cid in target.hand if self.cards[cid].has_defense]
+        # У «Баклажабы» флаг защиты стоит ошибочно: в тексте только активация.
+        NOT_DEFENSES = {"beast_jaba"}
+        defenses = [] if target.no_defense_turn else [
+            cid for cid in target.hand
+            if self.cards[cid].has_defense and cid not in NOT_DEFENSES
+            and (self.cards[cid].defense_text or "").strip()
+        ]
         if defenses and not attack["unavoidable"]:
             options = [{"id": "take", "label": f"Принять {amount} урона"}]
             options += [
@@ -966,7 +1119,9 @@ class GameState:
                         target.discard.append(cid)
                         from . import effects
                         effects.apply_defense(self, target, source, self.cards[cid])
-                        self.log(f"{target.name}: защищается картой «{self.cards[cid].name}»")
+                        self.log(f"{target.name}: защищается картой «{self.cards[cid].name}» — "
+                                 f"{self.cards[cid].defense_text or 'атака отменена'}")
+                        self.emit_visual_event("defend", target, [cid], "hand", "discard")
                         attack["index"] += 1
                         self._advance_attack()
                         return
@@ -1266,13 +1421,19 @@ class GameState:
             add_step("Вялые палочки", sticks_vp, "bad")
             add_step("Свойство «Скидка на сокровища»", treasure_vp, "good")
             # Условные ПО карт, лежащих у игрока.
-            if "beast_geek" in pool:
-                _b = sum(1 for cid in pool if "Тварь" in self.cards[cid].types_for_matching)
+            geeks = pool.count("beast_geek")
+            if geeks:
+                # Каждая копия Гикпига считает тварей отдельно — они стакаются.
+                _b = sum(1 for cid in pool if "Тварь" in self.cards[cid].types_for_matching) * geeks
+                label = "Потный Гикпиг: за тварей" if geeks == 1 else f"Потный Гикпиг x{geeks}: за тварей"
                 vp += _b
-                add_step("Потный Гикпиг: за тварей", _b, "good")
-            if "leg_goose" in pool:
-                vp += 2 * legends
-                add_step("Гусыня: за легенды", 2 * legends, "good")
+                add_step(label, _b, "good")
+            geese = pool.count("leg_goose")
+            if geese:
+                _gv = 2 * legends * geese
+                label = "Гусыня: за легенды" if geese == 1 else f"Гусыня x{geese}: за легенды"
+                vp += _gv
+                add_step(label, _gv, "good")
             if "place_circus" in pool and p.is_loshara:
                 vp += 10  # базовый штраф лошары (-5) становится бонусом (+5)
                 add_step("Цирк Лошашных: штраф стал бонусом", 10, "good")
@@ -1295,6 +1456,8 @@ class GameState:
                 vp -= 5
                 add_step("Ты лошара", -5, "bad")
             for tid in p.death_tokens:
+                if tid.startswith("sdk_"):
+                    continue          # Дохляки — карты барахолки, не жетоны
                 tok = self.zhdk.get(tid)
                 _pen = (tok.get("vp_penalty", -3) if tok else -3)
                 vp += _pen
@@ -1311,8 +1474,9 @@ class GameState:
                 _pair = -(self.zhdk["dk_13"].get("vp_penalty", -8) + self.zhdk["dk_14"].get("vp_penalty", -8))
                 vp += _pair
                 add_step("Два сапога — пара: штрафы сняты", _pair, "good")
+            real_tokens = [t for t in p.death_tokens if not t.startswith("sdk_")]
             scores[p.id] = {"vp": vp, "legends": legends,
-                            "death_tokens": len(p.death_tokens), "steps": steps}
+                            "death_tokens": len(real_tokens), "steps": steps}
         self.logs.append("=== ИГРА ОКОНЧЕНА ===")
         best = max(scores.items(), key=lambda kv: (kv[1]["vp"], kv[1]["legends"], -kv[1]["death_tokens"]))
         self.winner = best[0]
@@ -1425,5 +1589,8 @@ class GameState:
                                    self.final_scores[x.id]["death_tokens"]),
                 )
             ] if self.final_scores else None,
-            "logs": self.logs[-30:],
+            # Лента сгоревших карт: клиент проигрывает анимацию по seq.
+            "destroy_reel": self.destroy_reel[-4:],
+            # 30 строк вытеснялись цепочкой Беспределов — держим больше.
+            "logs": self.logs[-100:],
         }

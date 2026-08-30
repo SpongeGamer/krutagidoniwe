@@ -76,8 +76,23 @@ $("join-btn").onclick=()=>{
   connect(name);
 };
 $("name-input")?.addEventListener('keydown',e=>{if(e.key==='Enter')$('join-btn').click()});
-function handleMessage(msg){if(msg.type==='pong'){return}if(msg.type==='joined'){myId=msg.player_id;localStorage.setItem('krutagidon_pid_'+roomId,myId);$('lobby-room-code').textContent=roomId;$('room-code-game').textContent=roomId;const l=$('lobby-link');if(l)l.value=inviteUrl(roomId);if(!msg.returning)show('lobby-screen')}else if(msg.type==='lobby'){renderLobby(msg);if(msg.started)show('game-screen')}else if(msg.type==='state'){const motion=captureVisualMotion(msg.state.visual_event);lastState=msg.state;show('game-screen');render(msg.state);prepareVisualMotion(motion);requestAnimationFrame(()=>playVisualMotion(motion,msg.state.visual_event))}else if(msg.type==='error'){playSound('error');alert(msg.message)}}
+function handleMessage(msg){if(msg.type==='pong'){return}if(msg.type==='to_lobby'){returnToLobby();return}if(msg.type==='joined'){myId=msg.player_id;localStorage.setItem('krutagidon_pid_'+roomId,myId);$('lobby-room-code').textContent=roomId;$('room-code-game').textContent=roomId;const l=$('lobby-link');if(l)l.value=inviteUrl(roomId);if(!msg.returning)show('lobby-screen')}else if(msg.type==='lobby'){renderLobby(msg);if(msg.started)show('game-screen')}else if(msg.type==='state'){const motion=captureVisualMotion(msg.state.visual_event);lastState=msg.state;show('game-screen');render(msg.state);prepareVisualMotion(motion);requestAnimationFrame(()=>playVisualMotion(motion,msg.state.visual_event))}else if(msg.type==='error'){playSound('error');alert(msg.message)}}
 function show(id){['join-screen','lobby-screen','game-screen'].forEach(s=>$(s).classList.toggle('hidden',s!==id))}
+/* Хост нажал «Все в лобби»: чистим стол и показываем комнату (v73) */
+function returnToLobby(){
+  ['gameover-modal','event-modal','decision-modal','target-modal','attack-modal',
+   'wild-modal','tokens-modal','card-modal','confirm-act-modal','confirm-fam-modal',
+   'pay-modal','pause-overlay','burn-layer'].forEach(id=>{
+    const el=$(id);if(el)el.classList.add('hidden');
+  });
+  // Сбрасываем состояние партии, иначе новая начнётся с чужими данными.
+  announcedGameOver=false;lastState=null;lastTurnPlayer=null;
+  lastToastSequence=0;lastVisualSequence=0;lastBurstKey='';
+  lastDestroySeq=0;burnQueue=[];burnBusy=false;
+  deferredAttackMode=false;wildTargetMode=false;
+  pendingTargetCard=null;pendingAttackChoice=null;permanentActivationCard=null;
+  show('lobby-screen');
+}
 function renderLobby(msg){$('lobby-players').innerHTML=msg.players.map(p=>`<li>${escapeHtml(p.name)}${p.id===msg.host_id?' · хост':''} <span class="${p.ready?'ready':''}">${p.ready?'✓ готов':'выбирает свойство / фамильяра'}</span></li>`).join('');const hasProperty=Boolean(msg.selected_property_id);$('familiar-picker').classList.toggle('hidden',!hasProperty);if(hasProperty){const selected=msg.selected_familiar_ids||[];$('familiar-choice-title').textContent=msg.familiar_required===3?`Выбери фамильяров: ${selected.length}/3`:`Выбери одного фамильяра: ${selected.length}/1`;$('familiar-options').replaceChildren(...msg.familiar_choices.map(board=>familiarButton(board,selected)))}$('property-options').replaceChildren(...msg.property_choices.map(p=>propertyButton(p,msg.selected_property_id)));$('start-btn').disabled=msg.players.some(p=>!p.ready);$('host-settings').classList.toggle('hidden',!msg.is_host);$('add-bot-btn').classList.toggle('hidden',!msg.is_host);if(msg.is_host){$('zhdk-mode').value=msg.settings?.zhdk_mode||'standard';$('zhdk-custom').classList.toggle('hidden',$('zhdk-mode').value!=='custom');if(msg.settings?.zhdk_count)$('zhdk-custom').value=msg.settings.zhdk_count}}
 function boardToCard(board){return {id:board.familiar_id||board.id,name:board.familiar_name,type:board.type||'Фамильяр',cost:board.cost||0,power:board.power||0,vp:board.vp||0,text:board.familiar_text||''}}
 function familiarButton(board,selected){
@@ -210,12 +225,13 @@ function flyCard(motion){
 }
 function playVisualMotion(motion,event){
   if(motion)flyCard(motion);
+  if(event?.type==='defend')showDefendFx(event);
   if(event?.type==='turn'){
     const overlay=$('turn-overlay');overlay.textContent=`ХОД ИГРОКА ${event.player||''}`;overlay.classList.remove('hidden');setTimeout(()=>overlay.classList.add('hidden'),1300);
   }
 }
 /* ---------- Счётчики стопок и диагностика (v43) ---------- */
-const BUILD_TAG='v69';
+const BUILD_TAG='v73';
 function setPileCounts(me){
   const d=$('self-deck-count'),c=$('self-discard-count');
   if(d)d.textContent=(me&&Number.isFinite(me.deck_count))?me.deck_count:0;
@@ -368,6 +384,19 @@ function finishCount(state,rows){
     $('gameover-winner').textContent=win?`Победитель: ${win.name}`:'Игра окончена';
     $('gameover-winner').classList.add('reveal');
     $('gameover-close').classList.remove('hidden');
+    // Кнопка «в лобби» — только у хоста. Он жмёт, и уходят ВСЕ.
+    const lob=$('gameover-lobby');
+    if(lob){
+      const isHost=Boolean(state.is_host);
+      lob.classList.toggle('hidden',!isHost);
+      lob.onclick=()=>{playSound('click');ws.send(JSON.stringify({action:'return_to_lobby'}))};
+      const note=$('gameover-note');
+      if(note){
+        note.textContent=isHost?'Нажми «Все в лобби» — и вся компания вернётся в комнату для новой партии.'
+                               :'Ждём хоста: он вернёт всех в лобби для новой партии.';
+        note.classList.remove('hidden');
+      }
+    }
     playSound('turn');
   },700);
 }
@@ -450,6 +479,142 @@ function cardNeedsTarget(card){
   if(/кажд(ый|ому|ого) (колдун|враг)/.test(t))return false;   // бьёт по всем
   return /выбранн|выбери|левому|правому|левого|правого/.test(t);
 }
+/* ---------- СОЖЖЕНИЕ КАРТЫ (v73) ----------
+   Уничтоженную карту показываем ВСЕМ: крупная картинка, название, текст,
+   кто её потерял и почему. Карта обугливается и осыпается пеплом.
+   Очередь: несколько уничтожений подряд проигрываются по одному. */
+let lastDestroySeq=0,burnQueue=[],burnBusy=false;
+function renderDestroyReel(reel){
+  if(!Array.isArray(reel)||!reel.length)return;
+  const fresh=reel.filter(d=>d&&d.seq>lastDestroySeq);
+  if(!fresh.length)return;
+  lastDestroySeq=Math.max(...reel.map(d=>d.seq||0));
+  fresh.forEach(d=>burnQueue.push(d));
+  pumpBurnQueue();
+}
+function pumpBurnQueue(){
+  if(burnBusy||!burnQueue.length)return;
+  burnBusy=true;
+  playBurnCard(burnQueue.shift(),()=>{burnBusy=false;pumpBurnQueue()});
+}
+function playBurnCard(info,done){
+  const layer=$('burn-layer');
+  if(!layer){done();return}
+  layer.innerHTML=`
+    <div class="burn-stage">
+      <div class="burn-eyebrow">КАРТА УНИЧТОЖЕНА</div>
+      <div class="burn-card">
+        <div class="burn-photo"><img alt=""></div>
+        <div class="burn-flames"></div>
+        <div class="burn-ash"></div>
+      </div>
+      <div class="burn-copy">
+        <div class="burn-name">${escapeHtml(info.name||'Карта')}</div>
+        <div class="burn-type">${escapeHtml(info.type||'')}</div>
+        <div class="burn-text">${escapeHtml((info.text||'').slice(0,190))}</div>
+        <div class="burn-reason">${escapeHtml(info.reason||'')}</div>
+      </div>
+    </div>`;
+  const img=layer.querySelector('.burn-photo img');
+  attachCardImage(img,info.card_id,()=>{
+    const ph=layer.querySelector('.burn-photo');
+    if(ph)ph.innerHTML=`<div class="burn-fallback"><b>${escapeHtml(info.name||'')}</b><small>${escapeHtml((info.text||'').slice(0,110))}</small></div>`;
+  });
+  // Искры поверх карты — чистый CSS, без внешних ресурсов.
+  const flames=layer.querySelector('.burn-flames');
+  for(let i=0;i<14;i++){
+    const s=document.createElement('i');
+    s.style.left=`${Math.random()*100}%`;
+    s.style.setProperty('--dx',`${(Math.random()*70-35).toFixed(0)}px`);
+    s.style.animationDelay=`${300+Math.random()*900}ms`;
+    s.style.animationDuration=`${900+Math.random()*700}ms`;
+    flames.appendChild(s);
+  }
+  layer.classList.remove('hidden');
+  void layer.offsetWidth;
+  layer.classList.add('run');
+  playSound('error');
+  clearTimeout(playBurnCard._t);
+  playBurnCard._t=setTimeout(()=>{
+    layer.classList.remove('run');
+    layer.classList.add('hidden');
+    layer.innerHTML='';
+    done();
+  },3200);
+}
+/* Щит над игроком, когда он отбил атаку — v70 */
+function showDefendFx(event){
+  const card=event.cards&&event.cards[0];
+  const row=document.querySelector(`.opp-card[data-player-id="${CSS.escape(event.player_id)}"]`);
+  if(row){
+    const fx=document.createElement('div');
+    fx.className='defend-fx';
+    fx.innerHTML='<span class="shield">🛡</span>';
+    row.appendChild(fx);
+    setTimeout(()=>fx.remove(),1800);
+  }
+  if(card){
+    const t=$('activity-toast');
+    if(t){
+      t.innerHTML=`<b>${escapeHtml(event.player||'Игрок')} защитился!</b><br>«${escapeHtml(card.name)}» — ${escapeHtml((card.text||'').slice(0,90))}`;
+      t.classList.remove('hidden');
+      clearTimeout(showDefendFx._t);
+      showDefendFx._t=setTimeout(()=>t.classList.add('hidden'),3200);
+    }
+  }
+}
+/* Постоянки соседа: клик по его планшету */
+function showPermanents(player){
+  const list=player.zone_in_play||[];
+  const eb=$('tokens-eyebrow');if(eb)eb.textContent='ПОСТОЯНКИ НА СТОЛЕ';
+  $('tokens-title').textContent=`Постоянки: ${escapeHtml(player.name)}`;
+  $('tokens-list').innerHTML=list.length?list.map((c,i)=>`
+    <button class="fam-line" data-i="${i}">
+      <img src="assets/cards/${encodeURIComponent(c.id)}.webp" alt="">
+      <span><b>${escapeHtml(c.name)}</b><small>${escapeHtml((c.text||'').slice(0,150))}</small></span>
+    </button>`).join(''):'<p>Постоянок нет.</p>';
+  $('tokens-list').querySelectorAll('.fam-line').forEach(b=>{
+    b.onclick=()=>{$('tokens-modal').classList.add('hidden');showCard(list[Number(b.dataset.i)])};
+  });
+  $('tokens-modal').classList.remove('hidden');
+}
+/* Чем платим за карту: мощь, чипсины или пополам */
+function askPayment(card,onPay){
+  const me=lastState?.players.find(p=>p.id===myId);
+  if(!me)return;
+  let cost=card.cost;
+  if(me.property_id==='svo_1'&&/Сокровище/.test(card.type||''))cost=Math.max(0,cost-1);
+  const power=me.power_available,chips=me.chipsines;
+  // Чипсинами платят только за легенды и фамильяров.
+  const isLegend=/Легенда/.test(card.type||'')||(lastState?.legend_market||[]).some(c=>c.id===card.id);
+  if(!isLegend){
+    if(cost>power){alert('За эту карту чипсинами платить нельзя — не хватает мощи');return}
+    onPay(0);return;
+  }
+  if(cost<=power){onPay(0);return}                 // хватает мощи — не спрашиваем
+  const minChips=Math.max(0,cost-power);
+  if(minChips>chips){alert('Не хватает мощи и чипсин');return}
+  const maxChips=Math.min(chips,cost);
+  $('pay-title').textContent=card.name;
+  $('pay-sub').textContent=`Стоимость ${cost} · у тебя ${power} мощи и ${chips} чипсин`;
+  // Ползунок: игрок сам решает, сколько чипсин отдать.
+  $('pay-options').innerHTML=`
+    <div class="pay-slider">
+      <div class="pay-readout"><b id="pay-pw">⚡ ${cost-minChips}</b><span>+</span><b id="pay-ch">◉ ${minChips}</b></div>
+      <input id="pay-range" type="range" min="${minChips}" max="${maxChips}" value="${minChips}" step="1">
+      <div class="pay-hint">Двигай: слева — больше мощи, справа — больше чипсин</div>
+      <button id="pay-go" class="button-primary">Купить</button>
+    </div>`;
+  const rng=$('pay-range');
+  const upd=()=>{
+    const ch=Number(rng.value);
+    $('pay-pw').textContent=`⚡ ${cost-ch}`;
+    $('pay-ch').textContent=`◉ ${ch}`;
+  };
+  rng.oninput=upd;upd();
+  $('pay-go').onclick=()=>{$('pay-modal').classList.add('hidden');onPay(Number(rng.value))};
+  $('pay-modal').classList.remove('hidden');
+}
 function escapeHtml(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function cardEl(card,onClick){const el=document.createElement('article');el.className='card'+(onClick?' is-actionable':'');el.dataset.cardId=card.id;el.title=`${card.name}\n${card.text||''}`;const img=document.createElement('img');img.className='cart-img';img.alt=card.name;img.loading='lazy';img.onload=()=>el.classList.add('has-image');attachCardImage(img,card.id,()=>{img.remove();el.classList.remove('has-image')});const info=document.createElement('div');info.className='card-info';info.innerHTML=`<div class="cname">${escapeHtml(card.name)}</div><div class="ctext">${escapeHtml((card.text||'').slice(0,128))}</div><div class="cfooter"><span class="cost">◉ ${card.cost}</span><span class="power">⚡ +${card.power}</span></div>`;el._cardData=card;const zoom=document.createElement('button');zoom.className='card-zoom';zoom.type='button';zoom.textContent='⌕';zoom.title='Открыть карту';zoom.onclick=(event)=>{event.stopPropagation();showCard(card)};el.append(img,info,zoom);if(onClick)el.onclick=onClick;return el}
 function playerEl(p,isMe,isTurn,seat){
@@ -480,11 +645,13 @@ function playerEl(p,isMe,isTurn,seat){
   };
   const plate=el.querySelector('.property-plate');
   if(plate)plate.onclick=(event)=>{event.stopPropagation();showInfo(p.property.name,p.property.text||'')};
+  const main=el.querySelector('.player-main');
+  if(main)main.onclick=(event)=>{event.stopPropagation();showPermanents(p)};
   const zh=el.querySelector('.main-zhdk');
   if(zh&&p.death_tokens)zh.onclick=(event)=>{event.stopPropagation();showTokens(p)};
   return el;
 }
-function render(state){const me=state.players.find(p=>p.id===myId),active=state.players.find(p=>p.id===state.turn_player_id),myTurn=state.turn_player_id===myId;/* СЧЁТЧИКИ КОЛОДЫ/СБРОСА — В САМОМ НАЧАЛЕ. Никакая ошибка ниже не должна их обнулять. */setPileCounts(me);try{if(lastTurnPlayer&&lastTurnPlayer!==state.turn_player_id)playSound('turn');lastTurnPlayer=state.turn_player_id;renderVisualEvent(state.visual_event);renderEvent(state.pending_event);renderDecision(state.pending_decision);$('turn-banner').textContent=active?(myTurn?'Твой ход — наводи Крутагидон':`Ходит ${active.name}`):'Подготовка';$('log-panel').innerHTML=state.logs.map(l=>`<div>${escapeHtml(l)}</div>`).join('');$('log-panel').scrollTop=$('log-panel').scrollHeight;const seatedPlayers=[...(me?[me]:[]),...state.players.filter(p=>p.id!==myId)];const seatLayouts={1:[0],2:[0,1],3:[0,2,3],4:[0,4,1,5],5:[0,4,2,3,5]};const seats=seatLayouts[seatedPlayers.length]||seatLayouts[5];$('opponents').replaceChildren(...seatedPlayers.map((p,index)=>playerEl(p,p.id===myId,p.id===state.turn_player_id,seats[index])));$('played-cards').replaceChildren(...(active?.played_this_turn||[]).map(c=>cardEl(c,null)));$('main-deck-count').textContent=state.main_deck_count;$('legend-deck-count').textContent=state.legend_deck_count;$('vyal-count').textContent=state.vyal_remaining;$('zhdk-count').textContent=state.undead_stack_count;$('chips-bank-count').textContent=state.chips_bank;$('market').replaceChildren(...state.market.map(c=>cardEl(c,()=>myTurn&&buyCard(c.id))));$('legend-market').replaceChildren(...state.legend_market.map(c=>cardEl(c,()=>myTurn&&buyCard(c.id))));$('buy-wild-btn').disabled=!myTurn;const famBtn=$('buy-familiar-btn');const famLeft=(me?.familiars||[]).filter(f=>!(me?.bought_familiars||[]).includes(f.id));famBtn.disabled=!myTurn||!me||famLeft.length===0;
+function render(state){const me=state.players.find(p=>p.id===myId),active=state.players.find(p=>p.id===state.turn_player_id),myTurn=state.turn_player_id===myId;/* СЧЁТЧИКИ КОЛОДЫ/СБРОСА — В САМОМ НАЧАЛЕ. Никакая ошибка ниже не должна их обнулять. */setPileCounts(me);try{if(lastTurnPlayer&&lastTurnPlayer!==state.turn_player_id)playSound('turn');lastTurnPlayer=state.turn_player_id;renderVisualEvent(state.visual_event);renderDestroyReel(state.destroy_reel);renderEvent(state.pending_event);renderDecision(state.pending_decision);$('turn-banner').textContent=active?(myTurn?'Твой ход — наводи Крутагидон':`Ходит ${active.name}`):'Подготовка';$('log-panel').innerHTML=state.logs.map(l=>`<div>${escapeHtml(l)}</div>`).join('');$('log-panel').scrollTop=$('log-panel').scrollHeight;const seatedPlayers=[...(me?[me]:[]),...state.players.filter(p=>p.id!==myId)];const seatLayouts={1:[0],2:[0,1],3:[0,2,3],4:[0,4,1,5],5:[0,4,2,3,5]};const seats=seatLayouts[seatedPlayers.length]||seatLayouts[5];$('opponents').replaceChildren(...seatedPlayers.map((p,index)=>playerEl(p,p.id===myId,p.id===state.turn_player_id,seats[index])));$('played-cards').replaceChildren(...(active?.played_this_turn||[]).map(c=>cardEl(c,null)));$('main-deck-count').textContent=state.main_deck_count;$('legend-deck-count').textContent=state.legend_deck_count;$('vyal-count').textContent=state.vyal_remaining;$('zhdk-count').textContent=state.undead_stack_count;$('chips-bank-count').textContent=state.chips_bank;$('market').replaceChildren(...state.market.map(c=>cardEl(c,()=>myTurn&&buyCard(c.id))));$('legend-market').replaceChildren(...state.legend_market.map(c=>cardEl(c,()=>myTurn&&buyCard(c.id))));$('buy-wild-btn').disabled=!myTurn;const famBtn=$('buy-familiar-btn');const famLeft=(me?.familiars||[]).filter(f=>!(me?.bought_familiars||[]).includes(f.id));famBtn.disabled=!myTurn||!me||famLeft.length===0;
 /* Фамильяр куплен — карточка уходит совсем, Шальная магия занимает её место. */
 famBtn.classList.toggle('hidden',famLeft.length===0);
 if(famLeft.length){famBtn.innerHTML='<img class="buy-fam-thumb" alt="">';famBtn.title=famLeft.length>1?`Купить фамильяра (${famLeft.length} на выбор) · 6`:`Купить фамильяра: ${famLeft[0].name} · 6`;attachCardImage(famBtn.querySelector('img'),famLeft[0].id);bindPreview(famBtn,()=>famLeft[0]);if(famLeft.length>1)famBtn.innerHTML+=`<b class="fam-left">${famLeft.length}</b>`}else{famBtn.innerHTML=''};$('hand').replaceChildren(...(me?.hand||[]).map(c=>cardEl(c,()=>myTurn&&playCard(c))));$('permanents').replaceChildren(...(me?.zone_in_play||[]).map(c=>cardEl(c,c.activation?()=>activatePermanent(c):null)));$('attack-actions').replaceChildren(...(me?.available_attacks||[]).map(c=>deferredAttackButton(c,myTurn)));$('self-panel').classList.toggle('self-loshara',Boolean(me?.is_loshara));$('self-stats').innerHTML=me?`<div class="self-name">${escapeHtml(me.name)}${me.is_loshara?' · ЛОШАРА':''}${myTurn?' · ТВОЙ ХОД':''}</div><div class="self-meta"><span class="stat-chip health">♥ ${me.life}/${me.max_life} HP</span><span class="stat-chip power">⚡ ${me.power_available} мощи</span></div>`:'';if(me?.discard_top){$('self-discard-card').src=`assets/cards/${encodeURIComponent(me.discard_top.id)}.webp`}else{$('self-discard-card').src='assets/cards/card_closed.webp'}$('prize-supply').classList.toggle('hidden',state.players.some(p=>p.controls_prize));renderPause(state);$('end-turn-btn').disabled=!myTurn||Boolean(state.pause?.paused);if(state.game_over&&!announcedGameOver){announcedGameOver=true;showGameOver(state)}}catch(err){showRenderError(err)}}
@@ -530,7 +697,14 @@ function renderEvent(event){
   modal.classList.remove('hidden');
 }
 function renderDecision(decision){const modal=$('decision-modal');if(!decision||decision.waiting_for){modal.classList.add('hidden');return}$('decision-title').textContent=decision.title||'Выбери вариант';$('decision-text').textContent=decision.text||'';$('decision-revealed').replaceChildren(...(decision.revealed_cards||[]).map(card=>cardEl(card,null)));$('decision-options').replaceChildren(...(decision.options||[]).map(option=>{const button=document.createElement('button');button.className='target-button';button.innerHTML=`<b>${escapeHtml(option.label)}</b>${option.detail?`<small>${escapeHtml(option.detail)}</small>`:''}`;button.onclick=()=>{playSound('click');ws.send(JSON.stringify({action:'resolve_decision',option_id:option.id}))};return button}));modal.classList.remove('hidden')}
-function buyCard(cardId){playSound('click');ws.send(JSON.stringify({action:'buy_card',card_id:cardId}))}
+function buyCard(cardId){
+  const card=[...(lastState?.market||[]),...(lastState?.legend_market||[])].find(c=>c.id===cardId);
+  if(!card){ws.send(JSON.stringify({action:'buy_card',card_id:cardId}));return}
+  askPayment(card,(chips)=>{
+    playSound('click');
+    ws.send(JSON.stringify({action:'buy_card',card_id:cardId,use_chipsines:chips}));
+  });
+}
 function playCard(card){if(card.id==='spec_wild'){$('wild-modal').classList.remove('hidden');return}if(card.has_attack){pendingAttackChoice=card;$('attack-card-name').textContent=card.name;$('attack-modal').classList.remove('hidden');return}sendPlay(card,{})}
 function playAttackNow(card){if(cardNeedsTarget(card))openTargetModal(card);else sendPlay(card,{})}
 function deferredAttackButton(card,myTurn){const b=document.createElement('button');b.className='deferred-attack';b.disabled=!myTurn;b.innerHTML=`⚔ Атаковать: <b>${escapeHtml(card.name)}</b>`;b.onclick=()=>activateDeferredAttack(card);return b}

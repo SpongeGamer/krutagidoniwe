@@ -150,6 +150,39 @@ class Room:
         if self.game:
             self.game.log(text)
 
+    def reset_to_lobby(self):
+        """Партия окончена — всех обратно в лобби, состав стола сохраняем.
+
+        Свойства и фамильяры раздаются заново: иначе следующая партия
+        стартовала бы с теми же картами, что и предыдущая.
+        """
+        self.game = None
+        self.started = False
+        self.manual_pause = False
+        self.offline.clear()
+        self.property_offers.clear()
+        self.selected_properties.clear()
+        self.familiar_offers.clear()
+        self.selected_familiars.clear()
+        for pid in list(self.player_names):
+            self.ensure_property_offer(pid)
+        # Боты снова выбирают свойство и фамильяра, иначе застрянут «не готовы».
+        for bot_id in list(self.bot_ids):
+            offers = self.property_offers.get(bot_id, [])
+            if not offers:
+                continue
+            prop_id = offers[0]["id"]
+            self.selected_properties[bot_id] = prop_id
+            self.ensure_familiar_offer(bot_id)
+            fam_offers = self.familiar_offers.get(bot_id, [])
+            needed = 3 if prop_id == "svo_2" else 1
+            selected = [b["id"] for b in fam_offers[:needed]]
+            if needed == 3 and len(selected) < 3:
+                used = {fid for fids in self.selected_familiars.values() for fid in fids} | set(selected)
+                extra = [b["id"] for b in BOARDS if b["id"] not in used][:3 - len(selected)]
+                selected.extend(extra)
+            self.selected_familiars[bot_id] = selected
+
     def is_bot(self, player_id: Optional[str]) -> bool:
         return bool(player_id and player_id in self.bot_ids)
 
@@ -499,6 +532,23 @@ async def ws_endpoint(websocket: WebSocket, room_id: str):
                 await room.broadcast_lobby()
                 continue
 
+            # Хост закрывает итоги — ВСЕХ возвращает в лобби, а не только себя.
+            if action == "return_to_lobby":
+                if player_id != room.host_id:
+                    await websocket.send_json({"type": "error",
+                                               "message": "Только хост может вернуть всех в лобби"})
+                    continue
+                if not room.started:
+                    continue
+                room.reset_to_lobby()
+                for pid, sock in list(room.connections.items()):
+                    try:
+                        await sock.send_json({"type": "to_lobby"})
+                    except Exception:
+                        pass
+                await room.broadcast_lobby()
+                continue
+
             if action == "start_game":
                 if not room.started:
                     missing_property = [pid for pid in room.player_names if pid not in room.selected_properties]
@@ -559,11 +609,11 @@ async def ws_endpoint(websocket: WebSocket, room_id: str):
             elif action == "activate_permanent":
                 result = room.game.activate_permanent(gp, msg["card_id"], **msg.get("params", {}))
             elif action == "buy_card":
-                result = room.game.buy_card(gp, msg["card_id"])
+                result = room.game.buy_card(gp, msg["card_id"], msg.get("use_chipsines"))
             elif action == "buy_wild_magic":
                 result = room.game.buy_wild_magic(gp)
             elif action == "buy_familiar":
-                result = room.game.buy_familiar(gp, msg.get("card_id"))
+                result = room.game.buy_familiar(gp, msg.get("card_id"), msg.get("use_chipsines"))
             elif action == "end_turn":
                 result = room.game.end_turn(gp)
 

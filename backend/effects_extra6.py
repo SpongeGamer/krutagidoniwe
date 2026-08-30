@@ -22,23 +22,21 @@ def _fam_benz(game, player, card, **kw):
 @defense("fam_benz")
 def _def_benz(game, defender, attacker, card):
     """Возьми 1 карту и перенаправь атаку на атакующего."""
+    from .effects import redirect_attack
     game.draw_cards(defender, 1)
-    if attacker and attacker.is_alive():
-        amount = 0
-        attack = game.pending_attack
-        if attack:
-            amount = attack["targets"][attack["index"]]["amount"]
-        if amount > 0:
-            game.deal_damage(defender, attacker.id, amount, f"{card.name} (перенаправление)")
-            game.log(f"{defender.name}: перенаправляет {amount} урона обратно в {attacker.name}")
+    redirect_attack(game, defender, attacker, card)
 
 
 @effect("fam_weaboo")
 def _fam_weaboo(game, player, card, **kw):
     """Если под контролем есть легенда — атака: 8 урона, распределённых по врагам."""
+    if not kw.get("use_attack", True):
+        return
+    # «Под контролем» = постоянки на столе и карты, сыгранные в этот ход.
     has_legend = any("Легенда" in game.cards[cid].types_for_matching
                      for cid in game.controlled_card_ids(player))
-    if not has_legend or not kw.get("use_attack", True):
+    if not has_legend:
+        game.log(f"{card.name}: под контролем нет легенды — атака недоступна")
         return
     enemies = [p for p in game.enemies_of(player) if p.is_alive()]
     if not enemies:
@@ -118,19 +116,27 @@ def _fam_jester(game, player, card, **kw):
 
 @defense("fam_jester")
 def _def_jester(game, defender, attacker, card):
+    # «Возьми 1 карту и перенаправь атаку на атакующего.»
+    from .effects import redirect_attack
     game.draw_cards(defender, 1)
+    redirect_attack(game, defender, attacker, card)
 
 
 @effect("fam_hostages")
 def _fam_hostages(game, player, card, **kw):
     """Выбранный враг сбрасывает случайную карту."""
-    target = game.get_player(kw.get("target_id"))
-    if not target or not target.hand:
-        return
-    cid = game.rng.choice(target.hand)
-    target.hand.remove(cid)
-    target.discard.append(cid)
-    game.log(f"{target.name}: сбрасывает случайную карту «{game.cards[cid].name}»")
+    def discard_random(target):
+        if not target.hand:
+            game.log(f"{target.name}: рука пуста — сбрасывать нечего")
+            return
+        cid = game.rng.choice(target.hand)
+        target.hand.remove(cid)
+        target.discard.append(cid)
+        game.log(f"{target.name}: сбрасывает случайную карту «{game.cards[cid].name}»")
+
+    # Цель выбирает игрок, окно показываем всегда — даже при одном враге.
+    game.choose_enemy(player, card, discard_random,
+                      "Кто сбросит случайную карту с руки?")
 
 
 @defense("fam_hostages")
@@ -257,19 +263,28 @@ def _act_magicspill(game, player, card, **kw):
     В тексте карты опечатка («атака»), цели тут нет — чистится своя рука.
     """
     game.destroy_from_zone(player, card.id, "zone_in_play")
-    if not player.hand:
+
+    def zone_cards():
+        # «С руки» + уже сыгранные в этот ход: игрок мог ошибочно сыграть
+        # карту и всё равно хочет её уничтожить.
+        return player.hand + player.in_play_this_turn
+
+    if not zone_cards():
         return
 
     def ask(remaining: int):
-        if remaining <= 0 or not player.hand:
+        pool = zone_cards()
+        if remaining <= 0 or not pool:
             return
-        options = [{"id": cid, "label": game.cards[cid].name} for cid in player.hand[:10]]
+        options = [{"id": cid, "label": game.cards[cid].name
+                    + ("" if cid in player.hand else " (сыграна)")} for cid in pool[:12]]
         options.append({"id": "stop", "label": "Хватит"})
 
         def resolve(choice: str):
             if choice == "stop":
                 return
-            game.destroy_from_zone(player, choice, "hand")
+            zone = "hand" if choice in player.hand else "in_play_this_turn"
+            game.destroy_from_zone(player, choice, zone)
             ask(remaining - 1)
 
         game.request_decision(
@@ -374,9 +389,8 @@ def _act_jaba(game, player, card, **kw):
         game.set_loshara(target, True)
 
 
-@defense("beast_jaba")
-def _def_jaba(game, defender, attacker, card):
-    pass
+# «Баклажаба» защитой НЕ является: в её тексте только активация
+# «уничтожь эту карту: атака». Флаг в базе стоит ошибочно.
 
 
 # ---------------------------------------------------------------------------

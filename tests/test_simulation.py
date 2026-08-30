@@ -606,3 +606,191 @@ def test_viagrus_gives_stick_each_turn():
 
     assert me.hand.count("spec_vyal") == before + 1, "палочка не выдана"
     assert game.vyal_remaining == stack_before - 1, "палочка не списана из стопки"
+
+
+def test_familiar_bought_with_chipsines():
+    """Фамильяр покупается за мощь + чипсины."""
+    game = GameState(["Я", "В"], seed=3)
+    me = game.active_player
+    me.familiar_card_ids = ["fam_benz"]
+    me.familiar_card_id = "fam_benz"
+    me.power_available = 5
+    me.chipsines = 1
+    assert not game.buy_familiar(me, "fam_benz").get("error")
+    assert me.power_available == 0 and me.chipsines == 0
+
+
+def test_prize_gives_chipsine_each_turn():
+    """Владелец Главного приза получает чипсину в конце своего хода."""
+    game = GameState(["Я", "В"], seed=3)
+    me = game.active_player
+    me.controls_prize = True
+    before = me.chipsines
+    game.end_turn(me)
+    assert me.chipsines == before + 1, "приз не принёс чипсину"
+
+
+def test_weaboo_needs_legend():
+    """«Счастливый виабу» без легенды под контролем не атакует."""
+    game = GameState(["Я", "В"], seed=3)
+    me = game.active_player
+    foe = game.enemies_of(me)[0]
+    foe.hand = []
+    before = foe.life
+    me.hand = ["fam_weaboo"]
+    game.play_card(me, "fam_weaboo", target_id=foe.id)
+    _auto_resolve(game)
+    assert foe.life == before, "виабу ударил без легенды"
+
+
+def test_jaba_is_not_defense():
+    """«Баклажаба» не предлагается как защитная карта."""
+    game = GameState(["Я", "В"], seed=3)
+    me, foe = game.players
+    foe.hand = ["beast_jaba"]
+    game.attack_target(me, game.cards["start_syrpal"], foe.id, 3)
+    assert not game.pending_decision, "Баклажаба предложена как защита"
+
+
+def test_dohlyaki_not_counted_as_tokens():
+    """Дохляки sdk_* не считаются жетонами ЖДК в финале."""
+    game = GameState(["Я", "В"], seed=1)
+    me = game.players[0]
+    me.death_tokens = ["dk_1", "sdk_1", "sdk_2"]
+    game._finish_game()
+    assert game.final_scores[me.id]["death_tokens"] == 1, "Дохляки посчитаны как ЖДК"
+
+
+def test_wild_magic_no_recursion():
+    """Украденная Шальная магия не срабатывает сама — игрок выбирает."""
+    game = GameState(["Аня", "Я"], seed=3)
+    a, me = game.players
+    me.deck = ["start_znak", "spec_wild"]
+    a.power_available = 0
+    a.hand = ["spec_wild"]
+    game.play_card(a, "spec_wild", choice="steal", target_id=me.id)
+    assert game.pending_decision, "Шальная магия сработала сама"
+    assert a.power_available == 0, "мощь начислена без выбора игрока"
+    game.resolve_decision(a, "power")
+    assert a.power_available == 2
+
+
+def test_dirtwind_asks_to_destroy():
+    """«Мусорный ветер» спрашивает, какую карту сбросa уничтожить."""
+    game = GameState(["Я", "В"], seed=3)
+    me = game.active_player
+    game.enemies_of(me)[0].hand = []
+    me.discard = ["start_znak", "start_pshik"]
+    me.hand = ["spell_dirtwind"]
+    game.play_card(me, "spell_dirtwind")
+    assert game.pending_decision, "выбор карты не предложен"
+    ids = [o["id"] for o in game.pending_decision["options"]]
+    assert "start_znak" in ids and "skip" in ids
+
+
+def test_buy_with_explicit_chipsines():
+    """Можно явно указать, сколько чипсин потратить."""
+    game = GameState(["Я", "В"], seed=3)
+    me = game.active_player
+    me.power_available = 10
+    me.chipsines = 10
+    legends = [c for c in game.legend_market if game.cards[c].cost >= 8]
+    assert legends
+    cid = legends[0]
+    cost = game.cards[cid].cost
+    assert not game.buy_card(me, cid, use_chipsines=cost).get("error")
+    assert me.power_available == 10, "мощь не должна тратиться"
+    assert me.chipsines == 10 - cost
+
+
+def test_chipsines_only_for_legends_and_familiars():
+    """Чипсинами платят ТОЛЬКО за легенды и фамильяров."""
+    # обычная карта барахолки — только за мощь
+    game = GameState(["Я", "В"], seed=3)
+    me = game.active_player
+    me.power_available = 0
+    me.chipsines = 20
+    assert game.buy_card(me, game.market[0]).get("error"), \
+        "обычную карту нельзя купить за чипсины"
+
+    # легенда — можно
+    game = GameState(["Я", "В"], seed=3)
+    me = game.active_player
+    me.power_available = 0
+    me.chipsines = 20
+    assert not game.buy_card(me, game.legend_market[0]).get("error"), \
+        "легенду можно купить за чипсины"
+
+    # Шальная магия — нельзя
+    game = GameState(["Я", "В"], seed=3)
+    me = game.active_player
+    me.power_available = 0
+    me.chipsines = 20
+    assert game.buy_wild_magic(me).get("error"), \
+        "Шальную магию нельзя купить за чипсины"
+
+    # Шальная магия за мощь — можно
+    game = GameState(["Я", "В"], seed=3)
+    me = game.active_player
+    me.power_available = 5
+    me.chipsines = 0
+    assert not game.buy_wild_magic(me).get("error")
+
+    # фамильяр — можно
+    game = GameState(["Я", "В"], seed=3)
+    me = game.active_player
+    me.familiar_card_ids = ["fam_benz"]
+    me.familiar_card_id = "fam_benz"
+    me.power_available = 0
+    me.chipsines = 20
+    assert not game.buy_familiar(me, "fam_benz").get("error"), \
+        "фамильяра можно купить за чипсины"
+
+
+def test_geek_and_goose_stack():
+    """Две копии Гикпига/Гусыни считаются обе, а не одна."""
+    game = GameState(["Т", "В"], seed=1)
+    p = game.players[0]
+    p.zone_in_play.extend(["beast_geek", "beast_geek"])
+    p.deck.extend(["beast_beer", "beast_ork"])
+    game._finish_game()
+    steps = {s["label"]: s["delta"] for s in game.final_scores[p.id]["steps"]}
+    geek = next((v for k, v in steps.items() if "Гикпиг" in k), 0)
+    # 4 твари (2 Гикпига + Пивохранилище + Орк) x 2 копии = 8
+    assert geek == 8, f"Гикпиги не стакаются: {geek}"
+
+
+def test_epic_vyal_asks_how_many():
+    """«ТА САМАЯ Вялая палочка» спрашивает, сколько палочек отдать."""
+    game = GameState(["Я", "Враг"], seed=3)
+    me, foe = game.players
+    foe.hand = []
+    foe.life = 3
+    me.hand = ["leg_epicvyal"]
+    game.play_card(me, "leg_epicvyal", target_id=foe.id)
+    assert game.pending_decision, "выбор количества не предложен"
+    ids = [o["id"] for o in game.pending_decision["options"]]
+    assert "0" in ids and "3" in ids, f"нет вариантов количества: {ids}"
+
+
+def test_magicspill_can_destroy_played_cards():
+    """«Волшебные отходы» видят и сыгранные в этот ход карты."""
+    game = GameState(["Я", "Враг"], seed=3)
+    me = game.active_player
+    me.zone_in_play.append("spell_magicspill")
+    me.hand = []
+    me.in_play_this_turn = ["start_pshik", "start_pshik"]
+    game.activate_permanent(me, "spell_magicspill")
+    assert game.pending_decision, "окно не появилось"
+    ids = [o["id"] for o in game.pending_decision["options"]]
+    assert "start_pshik" in ids, "сыгранные карты не предлагаются"
+
+
+def test_besp16_logs_victim():
+    """besp_16 пишет, кого именно выбрало самым хилым."""
+    game = GameState(["Я", "Бот"], seed=3)
+    game.players[0].life = 4
+    import backend.effects as ef
+    ef.EFFECT_REGISTRY["besp_16"](game, game.active_player, game.cards["besp_16"])
+    assert any("самый хилый" in line for line in game.logs), "не видно, кого выбрало"
+    assert game.players[0].is_loshara

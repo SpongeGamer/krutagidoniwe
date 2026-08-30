@@ -108,10 +108,14 @@ def rlyeh(game, player, card, **kw):
 def ass(game, player, card, **kw):
     if not kw.get("attack_only", False):
         game.draw_cards(player,2)
-    target=game.get_player(kw.get("target_id"))
-    if target:
+
+    def block(target):
         target.no_defense_turn=True
         game.log(f"{target.name}: не может защищаться до конца хода")
+
+    # Выбор врага делает ИГРОК — окно показываем всегда, даже если враг один.
+    game.choose_enemy(player, card, block,
+                      "Кто не сможет защищаться до конца хода?")
 
 
 @effect("leg_hahatalier")
