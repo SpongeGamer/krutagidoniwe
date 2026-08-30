@@ -146,6 +146,18 @@ class Room:
             self.selected_familiars[bot_id] = selected
         return bot_id
 
+    def remove_player(self, player_id: str):
+        """Убрать игрока или бота из лобби со всеми его выборами."""
+        self.player_names.pop(player_id, None)
+        self.player_avatars.pop(player_id, None)
+        self.selected_properties.pop(player_id, None)
+        self.selected_familiars.pop(player_id, None)
+        self.property_offers.pop(player_id, None)
+        self.familiar_offers.pop(player_id, None)
+        self.bot_ids.discard(player_id)
+        self.offline.discard(player_id)
+        self.connections.pop(player_id, None)
+
     def log_line(self, text: str):
         if self.game:
             self.game.log(text)
@@ -336,6 +348,7 @@ class Room:
     async def broadcast_lobby(self):
         players = [
             {"id": pid, "name": name, "avatar": self.player_avatars.get(pid, "🧙"),
+             "is_bot": self.is_bot(pid),
              "ready": len(self.selected_familiars.get(pid, [])) >= (3 if self.selected_properties.get(pid) == "svo_2" else 1)}
             for pid, name in self.player_names.items()
         ]
@@ -459,6 +472,35 @@ async def ws_endpoint(websocket: WebSocket, room_id: str):
                     await websocket.send_json({"type": "error", "message": "Бота может добавить только хост"})
                 elif not room.add_bot():
                     await websocket.send_json({"type": "error", "message": "Нельзя добавить больше ботов"})
+                await room.broadcast_lobby()
+                continue
+
+            # Хост убирает лишнего бота или игрока из лобби.
+            if action == "kick_player" and not room.started:
+                target_id = msg.get("player_id")
+                if player_id != room.host_id:
+                    await websocket.send_json({"type": "error",
+                                               "message": "Убирать игроков может только хост"})
+                elif target_id == room.host_id:
+                    await websocket.send_json({"type": "error",
+                                               "message": "Хост не может выгнать сам себя"})
+                elif target_id not in room.player_names:
+                    await websocket.send_json({"type": "error",
+                                               "message": "Такого игрока в комнате нет"})
+                else:
+                    kicked_name = room.player_names.get(target_id, "Колдун")
+                    was_human = not room.is_bot(target_id)
+                    sock = room.connections.get(target_id)
+                    room.remove_player(target_id)
+                    # Человеку сообщаем и закрываем соединение, иначе он
+                    # продолжит висеть в комнате с открытым лобби.
+                    if was_human and sock:
+                        try:
+                            await sock.send_json({"type": "kicked",
+                                                  "message": f"{kicked_name}, хост убрал тебя из комнаты"})
+                            await sock.close()
+                        except Exception:
+                            pass
                 await room.broadcast_lobby()
                 continue
 

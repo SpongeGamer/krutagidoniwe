@@ -76,8 +76,20 @@ $("join-btn").onclick=()=>{
   connect(name);
 };
 $("name-input")?.addEventListener('keydown',e=>{if(e.key==='Enter')$('join-btn').click()});
-function handleMessage(msg){if(msg.type==='pong'){return}if(msg.type==='to_lobby'){returnToLobby();return}if(msg.type==='joined'){myId=msg.player_id;localStorage.setItem('krutagidon_pid_'+roomId,myId);$('lobby-room-code').textContent=roomId;$('room-code-game').textContent=roomId;const l=$('lobby-link');if(l)l.value=inviteUrl(roomId);if(!msg.returning)show('lobby-screen')}else if(msg.type==='lobby'){renderLobby(msg);if(msg.started)show('game-screen')}else if(msg.type==='state'){const motion=captureVisualMotion(msg.state.visual_event);lastState=msg.state;show('game-screen');render(msg.state);prepareVisualMotion(motion);requestAnimationFrame(()=>playVisualMotion(motion,msg.state.visual_event))}else if(msg.type==='error'){playSound('error');alert(msg.message)}}
+function handleMessage(msg){if(msg.type==='pong'){return}if(msg.type==='to_lobby'){returnToLobby();return}if(msg.type==='kicked'){handleKicked(msg);return}if(msg.type==='joined'){myId=msg.player_id;localStorage.setItem('krutagidon_pid_'+roomId,myId);$('lobby-room-code').textContent=roomId;$('room-code-game').textContent=roomId;const l=$('lobby-link');if(l)l.value=inviteUrl(roomId);if(!msg.returning)show('lobby-screen')}else if(msg.type==='lobby'){renderLobby(msg);if(msg.started)show('game-screen')}else if(msg.type==='state'){const motion=captureVisualMotion(msg.state.visual_event);lastState=msg.state;show('game-screen');render(msg.state);prepareVisualMotion(motion);requestAnimationFrame(()=>playVisualMotion(motion,msg.state.visual_event))}else if(msg.type==='error'){playSound('error');alert(msg.message)}}
 function show(id){['join-screen','lobby-screen','game-screen'].forEach(s=>$(s).classList.toggle('hidden',s!==id))}
+/* Хост убрал игрока из комнаты: не переподключаемся молча (v74) */
+function handleKicked(msg){
+  wantConnection=false;                    // иначе автореконнект вернёт нас обратно
+  clearTimeout(reconnectTimer);
+  localStorage.removeItem('krutagidon_pid_'+roomId);
+  try{ws&&ws.close()}catch(e){}
+  playSound('error');
+  alert(msg.message||'Хост убрал тебя из комнаты');
+  show('join-screen');
+  const btn=$('join-btn');
+  if(btn){btn.disabled=false;btn.textContent='Играть'}
+}
 /* Хост нажал «Все в лобби»: чистим стол и показываем комнату (v73) */
 function returnToLobby(){
   ['gameover-modal','event-modal','decision-modal','target-modal','attack-modal',
@@ -93,7 +105,33 @@ function returnToLobby(){
   pendingTargetCard=null;pendingAttackChoice=null;permanentActivationCard=null;
   show('lobby-screen');
 }
-function renderLobby(msg){$('lobby-players').innerHTML=msg.players.map(p=>`<li>${escapeHtml(p.name)}${p.id===msg.host_id?' · хост':''} <span class="${p.ready?'ready':''}">${p.ready?'✓ готов':'выбирает свойство / фамильяра'}</span></li>`).join('');const hasProperty=Boolean(msg.selected_property_id);$('familiar-picker').classList.toggle('hidden',!hasProperty);if(hasProperty){const selected=msg.selected_familiar_ids||[];$('familiar-choice-title').textContent=msg.familiar_required===3?`Выбери фамильяров: ${selected.length}/3`:`Выбери одного фамильяра: ${selected.length}/1`;$('familiar-options').replaceChildren(...msg.familiar_choices.map(board=>familiarButton(board,selected)))}$('property-options').replaceChildren(...msg.property_choices.map(p=>propertyButton(p,msg.selected_property_id)));$('start-btn').disabled=msg.players.some(p=>!p.ready);$('host-settings').classList.toggle('hidden',!msg.is_host);$('add-bot-btn').classList.toggle('hidden',!msg.is_host);if(msg.is_host){$('zhdk-mode').value=msg.settings?.zhdk_mode||'standard';$('zhdk-custom').classList.toggle('hidden',$('zhdk-mode').value!=='custom');if(msg.settings?.zhdk_count)$('zhdk-custom').value=msg.settings.zhdk_count}}
+function renderLobby(msg){renderLobbyPlayers(msg);const hasProperty=Boolean(msg.selected_property_id);$('familiar-picker').classList.toggle('hidden',!hasProperty);if(hasProperty){const selected=msg.selected_familiar_ids||[];$('familiar-choice-title').textContent=msg.familiar_required===3?`Выбери фамильяров: ${selected.length}/3`:`Выбери одного фамильяра: ${selected.length}/1`;$('familiar-options').replaceChildren(...msg.familiar_choices.map(board=>familiarButton(board,selected)))}$('property-options').replaceChildren(...msg.property_choices.map(p=>propertyButton(p,msg.selected_property_id)));$('start-btn').disabled=msg.players.some(p=>!p.ready);$('host-settings').classList.toggle('hidden',!msg.is_host);$('add-bot-btn').classList.toggle('hidden',!msg.is_host);if(msg.is_host){$('zhdk-mode').value=msg.settings?.zhdk_mode||'standard';$('zhdk-custom').classList.toggle('hidden',$('zhdk-mode').value!=='custom');if(msg.settings?.zhdk_count)$('zhdk-custom').value=msg.settings.zhdk_count}}
+/* Список игроков в лобби. У хоста рядом с каждым — кнопка «выгнать» (v74) */
+function renderLobbyPlayers(msg){
+  const list=$('lobby-players');
+  const iamHost=Boolean(msg.is_host);
+  list.replaceChildren(...msg.players.map(p=>{
+    const li=document.createElement('li');
+    li.className='lobby-player'+(p.is_bot?' is-bot':'');
+    const canKick=iamHost&&p.id!==msg.host_id;
+    li.innerHTML=`
+      <span class="lp-who">${escapeHtml(p.avatar||'🧙')} ${escapeHtml(p.name)}${p.id===msg.host_id?' · хост':''}${p.id===myId?' · ты':''}</span>
+      <span class="lp-state ${p.ready?'ready':''}">${p.ready?'✓ готов':'выбирает свойство / фамильяра'}</span>`;
+    if(canKick){
+      const btn=document.createElement('button');
+      btn.className='lp-kick';btn.type='button';
+      btn.title=`Убрать ${p.name} из комнаты`;
+      btn.textContent='✕';
+      btn.onclick=()=>{
+        if(!confirm(`Убрать ${p.name} из комнаты?`))return;
+        playSound('click');
+        ws.send(JSON.stringify({action:'kick_player',player_id:p.id}));
+      };
+      li.appendChild(btn);
+    }
+    return li;
+  }));
+}
 function boardToCard(board){return {id:board.familiar_id||board.id,name:board.familiar_name,type:board.type||'Фамильяр',cost:board.cost||0,power:board.power||0,vp:board.vp||0,text:board.familiar_text||''}}
 function familiarButton(board,selected){
   const isPicked=selected.includes(board.id);
@@ -231,7 +269,7 @@ function playVisualMotion(motion,event){
   }
 }
 /* ---------- Счётчики стопок и диагностика (v43) ---------- */
-const BUILD_TAG='v73';
+const BUILD_TAG='v74';
 function setPileCounts(me){
   const d=$('self-deck-count'),c=$('self-discard-count');
   if(d)d.textContent=(me&&Number.isFinite(me.deck_count))?me.deck_count:0;
@@ -324,9 +362,12 @@ function showGameOver(state){
 function countUpScores(state,rows){
   const running={};rows.forEach(r=>running[r.id]=0);
   // все шаги всех игроков вперемешку по порядку статей
-  const maxSteps=Math.max(0,...rows.map(r=>(r.steps||[]).length));
+  // Пояснения вида «↳ в том числе фамильяр» очков не меняют — в бегущий
+  // подсчёт их не берём, они видны только в развёрнутой разбивке.
+  const scoring=r=>(r.steps||[]).filter(s=>s.kind!=='note');
+  const maxSteps=Math.max(0,...rows.map(r=>scoring(r).length));
   const queue=[];
-  for(let i=0;i<maxSteps;i++)rows.forEach(r=>{const st=(r.steps||[])[i];if(st)queue.push({pid:r.id,st})});
+  for(let i=0;i<maxSteps;i++)rows.forEach(r=>{const st=scoring(r)[i];if(st)queue.push({pid:r.id,st})});
   let k=0;
   const tick=()=>{
     if(k>=queue.length){finishCount(state,rows);return}
@@ -366,10 +407,13 @@ function finishCount(state,rows){
     if(!row.querySelector('.score-details')){
       const det=document.createElement('div');
       det.className='score-details hidden';
-      det.innerHTML=(r.steps||[]).map(st=>`
-        <div class="detail-line ${st.delta>0?'plus':'minus'}">
-          <span>${escapeHtml(st.label)}</span><b>${st.delta>0?'+':''}${st.delta}</b>
-        </div>`).join('')||'<div class="detail-line"><span>Нет начислений</span><b>0</b></div>';
+      det.innerHTML=(r.steps||[]).map(st=>st.kind==='note'
+        ? `<div class="detail-line note">
+             <span>${escapeHtml(st.label)}</span><b>${escapeHtml(st.note||'')}</b>
+           </div>`
+        : `<div class="detail-line ${st.delta>0?'plus':'minus'}">
+             <span>${escapeHtml(st.label)}</span><b>${st.delta>0?'+':''}${st.delta}</b>
+           </div>`).join('')||'<div class="detail-line"><span>Нет начислений</span><b>0</b></div>';
       det.innerHTML+=`<div class="detail-line total"><span>Итого</span><b>${r.vp} ПО</b></div>`;
       row.appendChild(det);
     }
@@ -500,13 +544,14 @@ function pumpBurnQueue(){
 function playBurnCard(info,done){
   const layer=$('burn-layer');
   if(!layer){done();return}
+  const COLS=4,ROWS=6;                    // на сколько кусков ломаем карту
   layer.innerHTML=`
     <div class="burn-stage">
       <div class="burn-eyebrow">КАРТА УНИЧТОЖЕНА</div>
       <div class="burn-card">
-        <div class="burn-photo"><img alt=""></div>
-        <div class="burn-flames"></div>
-        <div class="burn-ash"></div>
+        <div class="burn-whole"><img alt=""></div>
+        <div class="burn-shards"></div>
+        <div class="burn-flash"></div>
       </div>
       <div class="burn-copy">
         <div class="burn-name">${escapeHtml(info.name||'Карта')}</div>
@@ -515,32 +560,82 @@ function playBurnCard(info,done){
         <div class="burn-reason">${escapeHtml(info.reason||'')}</div>
       </div>
     </div>`;
-  const img=layer.querySelector('.burn-photo img');
+  const whole=layer.querySelector('.burn-whole');
+  const img=whole.querySelector('img');
+  let srcUsed=null;
   attachCardImage(img,info.card_id,()=>{
-    const ph=layer.querySelector('.burn-photo');
-    if(ph)ph.innerHTML=`<div class="burn-fallback"><b>${escapeHtml(info.name||'')}</b><small>${escapeHtml((info.text||'').slice(0,110))}</small></div>`;
+    // Картинки нет — ломаем текстовую карточку, эффект тот же.
+    whole.innerHTML=`<div class="burn-fallback"><b>${escapeHtml(info.name||'')}</b><small>${escapeHtml((info.text||'').slice(0,110))}</small></div>`;
   });
-  // Искры поверх карты — чистый CSS, без внешних ресурсов.
-  const flames=layer.querySelector('.burn-flames');
-  for(let i=0;i<14;i++){
-    const s=document.createElement('i');
-    s.style.left=`${Math.random()*100}%`;
-    s.style.setProperty('--dx',`${(Math.random()*70-35).toFixed(0)}px`);
-    s.style.animationDelay=`${300+Math.random()*900}ms`;
-    s.style.animationDuration=`${900+Math.random()*700}ms`;
-    flames.appendChild(s);
-  }
+
   layer.classList.remove('hidden');
   void layer.offsetWidth;
   layer.classList.add('run');
   playSound('error');
+
+  // Осколки строим, когда известен реальный размер карты.
+  const buildShards=()=>{
+    const box=layer.querySelector('.burn-card');
+    const shards=layer.querySelector('.burn-shards');
+    if(!box||!shards)return;
+    const W=box.clientWidth,H=box.clientHeight;
+    if(!W||!H)return;
+    srcUsed=img&&img.getAttribute('src');
+    const tileW=W/COLS,tileH=H/ROWS;
+    const frag=document.createDocumentFragment();
+    for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
+      const sh=document.createElement('div');
+      sh.className='shard';
+      sh.style.left=`${c*tileW}px`;   sh.style.top=`${r*tileH}px`;
+      sh.style.width=`${tileW}px`;    sh.style.height=`${tileH}px`;
+      // Кусок картинки: та же картинка, сдвинутая так, чтобы попал нужный фрагмент.
+      if(srcUsed){
+        const im=document.createElement('img');
+        im.src=srcUsed;
+        im.style.width=`${W}px`;im.style.height=`${H}px`;
+        im.style.left=`${-c*tileW}px`;im.style.top=`${-r*tileH}px`;
+        sh.appendChild(im);
+      }else{
+        sh.style.background='linear-gradient(150deg,#4a2a52,#20122a)';
+        sh.style.boxShadow='inset 0 0 0 1px #e0a94f55';
+      }
+      // Рваный край: слегка «покусанный» четырёхугольник вместо ровного квадрата.
+      const j=()=>(Math.random()*16).toFixed(1);
+      sh.style.setProperty('--clip',
+        `${j()}% ${j()}%, ${100-j()}% ${j()}%, ${100-j()}% ${100-j()}%, ${j()}% ${100-j()}%`);
+      // Разлёт: от центра карты наружу + случайный доворот.
+      const cx=(c+0.5)/COLS-0.5, cy=(r+0.5)/ROWS-0.5;
+      const push=170+Math.random()*190;
+      sh.style.setProperty('--tx',`${(cx*push*2.1+(Math.random()*40-20)).toFixed(0)}px`);
+      sh.style.setProperty('--ty',`${(cy*push*1.5+90+Math.random()*70).toFixed(0)}px`);
+      sh.style.setProperty('--rot',`${(Math.random()*150-75).toFixed(0)}deg`);
+      sh.style.setProperty('--sc',(0.45+Math.random()*0.3).toFixed(2));
+      sh.style.setProperty('--ang',`${Math.floor(Math.random()*360)}deg`);
+      sh.style.setProperty('--dur',`${(1.25+Math.random()*0.55).toFixed(2)}s`);
+      // Куски снизу срываются первыми — карта «оседает».
+      sh.style.setProperty('--delay',`${(1.16+(ROWS-1-r)*0.035+Math.random()*0.07).toFixed(2)}s`);
+      frag.appendChild(sh);
+    }
+    shards.appendChild(frag);
+  };
+  // Ждём загрузку картинки, но не дольше 600 мс — эффект важнее.
+  if(img&&!img.complete){
+    let built=false;
+    const once=()=>{if(built)return;built=true;buildShards()};
+    img.addEventListener('load',once,{once:true});
+    img.addEventListener('error',()=>setTimeout(once,60),{once:true});
+    setTimeout(once,600);
+  }else{
+    requestAnimationFrame(buildShards);
+  }
+
   clearTimeout(playBurnCard._t);
   playBurnCard._t=setTimeout(()=>{
     layer.classList.remove('run');
     layer.classList.add('hidden');
     layer.innerHTML='';
     done();
-  },3200);
+  },3400);
 }
 /* Щит над игроком, когда он отбил атаку — v70 */
 function showDefendFx(event){
@@ -591,10 +686,13 @@ function askPayment(card,onPay){
     if(cost>power){alert('За эту карту чипсинами платить нельзя — не хватает мощи');return}
     onPay(0);return;
   }
-  if(cost<=power){onPay(0);return}                 // хватает мощи — не спрашиваем
   const minChips=Math.max(0,cost-power);
   if(minChips>chips){alert('Не хватает мощи и чипсин');return}
   const maxChips=Math.min(chips,cost);
+  // Даже когда мощи хватает, игрок может доплатить чипсинами и сберечь
+  // мощь на вторую покупку — это тактика, отбирать её нельзя.
+  // Спрашиваем всегда, кроме случая, когда выбора реально нет.
+  if(minChips===maxChips){onPay(minChips);return}
   $('pay-title').textContent=card.name;
   $('pay-sub').textContent=`Стоимость ${cost} · у тебя ${power} мощи и ${chips} чипсин`;
   // Ползунок: игрок сам решает, сколько чипсин отдать.
@@ -602,6 +700,7 @@ function askPayment(card,onPay){
     <div class="pay-slider">
       <div class="pay-readout"><b id="pay-pw">⚡ ${cost-minChips}</b><span>+</span><b id="pay-ch">◉ ${minChips}</b></div>
       <input id="pay-range" type="range" min="${minChips}" max="${maxChips}" value="${minChips}" step="1">
+      <div class="pay-left" id="pay-left"></div>
       <div class="pay-hint">Двигай: слева — больше мощи, справа — больше чипсин</div>
       <button id="pay-go" class="button-primary">Купить</button>
     </div>`;
@@ -610,6 +709,8 @@ function askPayment(card,onPay){
     const ch=Number(rng.value);
     $('pay-pw').textContent=`⚡ ${cost-ch}`;
     $('pay-ch').textContent=`◉ ${ch}`;
+    // Показываем остаток: на него можно взять ещё карту в этом же ходу.
+    $('pay-left').textContent=`После покупки останется: ⚡ ${power-(cost-ch)} мощи · ◉ ${chips-ch} чипсин`;
   };
   rng.oninput=upd;upd();
   $('pay-go').onclick=()=>{$('pay-modal').classList.add('hidden');onPay(Number(rng.value))};

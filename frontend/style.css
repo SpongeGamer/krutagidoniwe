@@ -795,9 +795,11 @@ input { user-select:text; -webkit-user-select:text; }
 #pay-range{width:100%;accent-color:#ffd34e;cursor:pointer}
 .pay-hint{color:#bfaec2;font-size:11px}
 
-/* ============ v73: СОЖЖЕНИЕ УНИЧТОЖЕННОЙ КАРТЫ ============
-   Игрок должен ВИДЕТЬ, какая карта сгорела: картинка, название, текст.
-   Всё на CSS, без внешних картинок — работает и без интернета. */
+/* ============ v74: КАРТА РАССЫПАЕТСЯ НА КУСКИ ============
+   Раньше «огонь» рисовался ПОД карточкой в пустоте — выглядело мусорно.
+   Теперь рассыпается сама карта: она нарезана на плитки (по 4x6),
+   каждая плитка — копия картинки со сдвинутым background-position,
+   куски разлетаются в стороны, крутятся и гаснут. Всё на CSS. */
 .burn-layer{
   position:fixed;z-index:460;inset:0;display:grid;place-items:center;
   padding:20px;background:radial-gradient(ellipse at center,#2a0b04d9,#07030bf2);
@@ -811,63 +813,70 @@ input { user-select:text; -webkit-user-select:text; }
 }
 .burn-layer.run .burn-eyebrow{animation:burn-eyebrow .5s ease both}
 @keyframes burn-eyebrow{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
+
+/* Сцена карты: тут лежат и целая карта, и её осколки — строго друг на друге. */
 .burn-card{
   position:relative;width:min(230px,52vw);aspect-ratio:708/1000;
-  border-radius:11px;overflow:visible;
   filter:drop-shadow(0 16px 34px #000);
 }
-.burn-photo{position:absolute;inset:0;border-radius:11px;overflow:hidden;background:#2a1533}
-.burn-photo img{display:block;width:100%;height:100%;object-fit:cover}
+/* Целая карта: видна в начале, потом мгновенно прячется, уступая осколкам. */
+.burn-whole{position:absolute;inset:0;border-radius:11px;overflow:hidden;background:#2a1533}
+.burn-whole img{display:block;width:100%;height:100%;object-fit:cover}
+.burn-layer.run .burn-whole{animation:burn-whole 2.9s linear forwards}
+@keyframes burn-whole{
+  0%{opacity:0;transform:scale(.86) rotate(-3deg)}
+  10%{opacity:1;transform:scale(1.03) rotate(0)}
+  26%{opacity:1;transform:scale(1)}
+  /* дрожь перед разломом */
+  30%{transform:translate3d(-3px,0,0) scale(1)}
+  33%{transform:translate3d(3px,0,0) scale(1)}
+  36%{transform:translate3d(-2px,1px,0) scale(1)}
+  39%{opacity:1;transform:none}
+  40%{opacity:0}
+  100%{opacity:0}
+}
 .burn-fallback{
   display:grid;align-content:center;gap:7px;width:100%;height:100%;padding:14px;
   border:2px solid #e0a94f;border-radius:11px;background:linear-gradient(150deg,#4a2a52,#20122a);
 }
 .burn-fallback b{color:#ffe3a4;font-size:15px;line-height:1.2}
 .burn-fallback small{color:#d9c7dd;font-size:11px;line-height:1.3}
-.burn-layer.run .burn-card{animation:burn-card 3s cubic-bezier(.3,.7,.4,1) forwards}
-@keyframes burn-card{
-  0%{transform:scale(.82) rotate(-3deg);opacity:0}
-  14%{transform:scale(1.04) rotate(0deg);opacity:1}
-  30%{transform:scale(1) rotate(.6deg);opacity:1}
-  /* обугливание: края темнеют, карта скручивается */
-  62%{filter:drop-shadow(0 16px 34px #000) sepia(.7) saturate(2.2) brightness(.72);
-      transform:scale(.97) rotate(-1.4deg)}
-  100%{filter:drop-shadow(0 16px 34px #000) sepia(1) saturate(3) brightness(.22) blur(3px);
-       transform:scale(.86) rotate(3deg) translateY(26px);opacity:0}
+
+/* Осколки: сетка плиток поверх карты. */
+.burn-shards{position:absolute;inset:0;pointer-events:none}
+.burn-shards .shard{
+  position:absolute;overflow:hidden;opacity:0;
+  background-repeat:no-repeat;
+  will-change:transform,opacity;
+  /* рваный край — каждый кусок обрезан по своему многоугольнику */
+  clip-path:polygon(var(--clip,0% 0%,100% 0%,100% 100%,0% 100%));
 }
-/* Раскалённый обугленный край, наползающий снизу вверх */
-.burn-card:after{
-  content:'';position:absolute;inset:0;border-radius:11px;pointer-events:none;
-  background:linear-gradient(0deg,#1a0a02 0%,#7c2a06 6%,#ff8a1e 11%,#ffd36a 14%,transparent 20%);
-  mix-blend-mode:hard-light;opacity:0;
+.burn-shards .shard img{position:absolute;max-width:none;display:block}
+.burn-layer.run .burn-shards .shard{animation:shard-fly var(--dur,1.5s) cubic-bezier(.2,.6,.35,1) var(--delay,0s) forwards}
+@keyframes shard-fly{
+  0%{opacity:0;transform:translate3d(0,0,0) rotate(0) scale(1)}
+  1%{opacity:1}
+  55%{opacity:1}
+  100%{
+    opacity:0;
+    transform:translate3d(var(--tx,0),var(--ty,0),0) rotate(var(--rot,0deg)) scale(var(--sc,.7));
+  }
 }
-.burn-layer.run .burn-card:after{animation:burn-edge 3s ease-in forwards}
-@keyframes burn-edge{
-  0%,12%{opacity:0;transform:translateY(64%)}
-  26%{opacity:.95;transform:translateY(34%)}
-  74%{opacity:1;transform:translateY(-16%)}
-  100%{opacity:0;transform:translateY(-62%)}
+/* Тлеющая подсветка на изломе — куски будто раскалены по краю. */
+.burn-shards .shard:after{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(var(--ang,45deg),#ff9a2e88,transparent 55%);
+  mix-blend-mode:screen;opacity:0;
 }
-/* Искры и угольки, летящие вверх */
-.burn-flames{position:absolute;inset:-8% -14% 0;overflow:visible;pointer-events:none}
-.burn-flames i{
-  position:absolute;bottom:6%;width:6px;height:6px;border-radius:50%;
-  background:radial-gradient(circle,#fff1b8,#ff9a2e 45%,#d2440a 78%,transparent 80%);
-  box-shadow:0 0 10px #ff8a2a;opacity:0;
-}
-.burn-layer.run .burn-flames i{animation-name:burn-spark;animation-timing-function:ease-out;animation-fill-mode:forwards}
-@keyframes burn-spark{
-  0%{opacity:0;transform:translate3d(0,0,0) scale(.4)}
-  18%{opacity:1}
-  100%{opacity:0;transform:translate3d(calc(var(--dx,14px) * 1),-150px,0) scale(.15)}
-}
-/* Пепельная дымка под картой */
-.burn-ash{
-  position:absolute;left:-12%;right:-12%;bottom:-6%;height:46%;border-radius:50%;
-  background:radial-gradient(ellipse,#ff7a2233,transparent 70%);opacity:0;
-}
-.burn-layer.run .burn-ash{animation:burn-ash 3s ease-out forwards}
-@keyframes burn-ash{0%,20%{opacity:0}45%{opacity:1}100%{opacity:0;transform:scale(1.5)}}
+.burn-layer.run .burn-shards .shard:after{animation:shard-glow var(--dur,1.5s) ease-out var(--delay,0s) forwards}
+@keyframes shard-glow{0%{opacity:0}18%{opacity:.9}100%{opacity:0}}
+
+/* Вспышка в момент разлома */
+.burn-flash{position:absolute;inset:-18%;border-radius:50%;opacity:0;
+  background:radial-gradient(circle,#ffd98a88,#ff6a1e33 40%,transparent 68%)}
+.burn-layer.run .burn-flash{animation:burn-flash 2.9s ease-out forwards}
+@keyframes burn-flash{0%,36%{opacity:0;transform:scale(.6)}42%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1.35)}}
+
 .burn-copy{display:grid;gap:5px;max-width:460px}
 .burn-name{color:#ffe0a5;font-family:'Russo One',Impact,sans-serif;font-size:clamp(19px,3.4vw,27px);text-shadow:0 2px 10px #ff5c0f88}
 .burn-type{color:#ffab63;font-size:11px;font-weight:900;letter-spacing:.2em;text-transform:uppercase}
@@ -883,8 +892,8 @@ input { user-select:text; -webkit-user-select:text; }
   .burn-text{font-size:12px}
 }
 @media(prefers-reduced-motion:reduce){
-  .burn-layer.run .burn-card,.burn-layer.run .burn-card:after,
-  .burn-layer.run .burn-flames i,.burn-layer.run .burn-ash{animation-duration:.01ms!important}
+  .burn-layer.run .burn-whole,.burn-layer.run .burn-shards .shard,
+  .burn-layer.run .burn-flash{animation-duration:.01ms!important}
 }
 
 /* v73: кнопки итогового окна — хост уводит всех в лобби */
@@ -894,4 +903,25 @@ input { user-select:text; -webkit-user-select:text; }
 .gameover-note{
   margin-top:12px;padding:9px 14px;border:1px solid #ffd26e55;border-radius:10px;
   color:#ffe4ad;font-size:12px;text-align:center;background:#1b0f2399;
+}
+
+/* v74: список игроков в лобби с кнопкой «выгнать» у хоста */
+.lobby-players li.lobby-player{
+  display:flex;align-items:center;gap:10px;
+  padding:9px 12px;border-bottom:1px solid #ffffff12;
+}
+.lobby-player .lp-who{flex:1;min-width:0;color:#ffe9b8;font-weight:700;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lobby-player.is-bot .lp-who{color:#bfe6ff}
+.lobby-player .lp-state{flex:none;color:#c9b6cc;font-size:11px}
+.lobby-player .lp-state.ready{color:#aee875}
+.lp-kick{
+  flex:none;display:grid;place-items:center;width:26px;height:26px;padding:0;
+  border:1px solid #ff8d9f88;border-radius:50%;
+  color:#ffb9c4;font-size:14px;font-weight:900;line-height:1;
+  background:#431b28;cursor:pointer;transition:.15s;
+}
+.lp-kick:hover{border-color:#ff6d85;color:#fff;background:#8c2438;transform:scale(1.1)}
+@media(max-width:520px){
+  .lobby-player .lp-state{display:none}
 }

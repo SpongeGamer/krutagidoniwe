@@ -317,14 +317,57 @@ def _leg_tower(game, player, card, **kw):
 
 @activation("leg_throne")
 def _act_throne(game, player, card, **kw):
-    """Атака: урон равен стоимости другой карты под твоим контролем."""
+    """Атака: урон равен стоимости ЛЮБОЙ другой карты под твоим контролем.
+
+    «Под контролем» — это постоянки на столе, карты, сыгранные в этот ход,
+    И карты на руке. Раньше движок молча брал самую дорогую постоянку,
+    хотя карта прямо говорит «на выбор» — выбирает игрок.
+    """
     target = game.get_player(kw.get("target_id"))
     if not target:
         return
-    controlled = [cid for cid in game.controlled_card_ids(player) if cid != card.id]
-    if not controlled:
+
+    # Собираем все карты под контролем: стол + сыграно в этот ход + рука.
+    seen: list[tuple[str, str]] = []          # (card_id, откуда)
+    for cid in player.zone_in_play:
+        if cid != card.id:
+            seen.append((cid, "стол"))
+    for cid in player.in_play_this_turn:
+        if cid != card.id:
+            seen.append((cid, "сыграна"))
+    for cid in player.hand:
+        seen.append((cid, "рука"))
+    if not seen:
+        game.log(f"{card.name}: других карт под контролем нет — бить нечем")
         return
-    best = max(controlled, key=lambda cid: game.cards[cid].cost)
-    amount = game.cards[best].cost
-    game.log(f"{card.name}: урон {amount} по стоимости «{game.cards[best].name}»")
-    game.attack_target(player, card, target.id, amount)
+
+    # Одинаковые карты из одной зоны схлопываем, чтобы не плодить кнопки.
+    options, uniq = [], {}
+    for cid, zone in seen:
+        key = f"{cid}|{zone}"
+        if key in uniq:
+            continue
+        uniq[key] = cid
+        c = game.cards[cid]
+        options.append({
+            "id": key,
+            "label": f"{c.name} — {c.cost} урона",
+            "detail": f"{zone} · {c.type}",
+        })
+    # Самые больные варианты — сверху.
+    options.sort(key=lambda o: -game.cards[uniq[o["id"]]].cost)
+
+    def resolve(choice: str):
+        cid = uniq.get(choice)
+        if not cid:
+            return
+        amount = game.cards[cid].cost
+        game.log(f"{card.name}: {player.name} бьёт {target.name} на {amount} "
+                 f"(стоимость «{game.cards[cid].name}»)")
+        game.attack_target(player, card, target.id, amount)
+
+    game.request_decision(
+        player, card.name,
+        f"Чью стоимость превратить в урон по {target.name}?",
+        options, resolve, revealed_cards=[game.card_public(card.id)],
+    )

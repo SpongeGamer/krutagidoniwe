@@ -90,6 +90,8 @@ class Player:
     bought_familiars: list = field(default_factory=list)  # какие фамильяры уже куплены
     borrowed_cards: list = field(default_factory=list)  # (card_id, владелец) — Шальная магия
     next_attack_unavoidable: bool = False   # «Бензопила»: следующей атаке нельзя помешать
+    # Постоянки с атакой (например «Трондец») бьют ОДИН раз за свой ход.
+    used_activations: list = field(default_factory=list)
     brotality_active: bool = False          # «Браталити»: убитый не получит жетон ЖДК
     damage_dealt_this_turn: int = 0         # для «Ультимативного тронадо»
     first_damage_bonus_done: bool = False
@@ -512,6 +514,8 @@ class GameState:
         p.borrowed_cards = []
         p.next_attack_unavoidable = False
         p.brotality_active = False
+        # Новый ход — постоянки-атаки снова доступны.
+        p.used_activations = []
         static_power = 0
         static_power += sum(1 for cid in p.zone_in_play if cid in {"place_vyaltower", "beast_jellotit"})
         if "place_circus" in p.zone_in_play and p.is_loshara:
@@ -737,11 +741,20 @@ class GameState:
             self.log(f"[TODO] Атака «{card.name}» пока не реализована")
         return {"ok": True}
 
+    # Постоянки, которые бьют раз за ход, а не уничтожаются при активации.
+    ONCE_PER_TURN_ACTIVATIONS = {"leg_throne"}
+
     def activate_permanent(self, player: Player, card_id: str, **kwargs) -> dict:
         if player.id != self.active_player.id:
             return {"error": "Сейчас не ваш ход"}
         if card_id not in player.zone_in_play:
             return {"error": "Эта постоянка не находится у вас на столе"}
+        # «Трондец» — это АТАКА, а атака у карты одна за ход.
+        # Без этого его можно было жать бесконечно и убить любого за один ход.
+        if card_id in self.ONCE_PER_TURN_ACTIVATIONS:
+            if card_id in player.used_activations:
+                return {"error": f"«{self.cards[card_id].name}» уже атаковал в этом ходу"}
+            player.used_activations.append(card_id)
         from . import effects
         return effects.apply_activation(self, player, self.cards[card_id], **kwargs)
 
@@ -1443,10 +1456,20 @@ class GameState:
                 _v = sum(1 for cid in pool if self.cards[cid].type == WEAK_STICK_TYPE)
                 vp += _v * 2
                 add_step("Виагрус: палочки приносят ПО", _v * 2, "good")
-            if p.familiar_card_id and p.familiar_bought:
-                _f = self.cards[p.familiar_card_id].vp
-                vp += _f
-                add_step(f"Фамильяр «{self.cards[p.familiar_card_id].name}»", _f, "good")
+            # Купленные фамильяры уже лежат в колоде/сбросе игрока, поэтому их
+            # ПО посчитаны выше в «Очках на картах». Отдельной строкой их
+            # добавлять НЕЛЬЗЯ — получался двойной счёт. Здесь только показываем
+            # игроку, за каких именно фамильяров ему начислено (свойство
+            # «Фамильяры» даёт до трёх, и все должны быть видны в разбивке).
+            bought_fams = [cid for cid in (p.bought_familiars or []) if cid in pool]
+            if not bought_fams and p.familiar_bought and p.familiar_card_id in pool:
+                bought_fams = [p.familiar_card_id]
+            for fid in bought_fams:
+                fam = self.cards[fid]
+                if fam.vp:
+                    steps.append({"label": f"↳ в том числе фамильяр «{fam.name}»",
+                                  "delta": 0, "kind": "note",
+                                  "note": f"+{fam.vp} ПО уже учтены в картах"})
             # Главный приз Крутагидона даёт +5 ПО владельцу.
             # Жетон «Неглавный приз» (dk_8) этот бонус отменяет.
             if p.controls_prize and "dk_8" not in p.death_tokens:
