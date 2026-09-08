@@ -225,9 +225,7 @@ for _sdk_id in ["sdk_1", "sdk_2", "sdk_3", "sdk_4", "sdk_5"]:
 
 @effect("beast_ork")
 def _ork(game, player, card, **kw):
-    has_other_beast = any(game.cards[c].type == "Тварь" for c in player.in_play_this_turn if c != card.id) \
-        or any(game.cards[c].type == "Тварь" for c in player.zone_in_play)
-    if has_other_beast:
+    if game.has_extra_of_type(player, "Тварь", card.id):
         player.power_available += 2
         game.log(f"{player.name}: {card.name} — есть ещё тварь, +2 мощи (всего {player.power_available})")
 

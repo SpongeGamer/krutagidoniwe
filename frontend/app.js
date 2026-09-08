@@ -48,6 +48,9 @@ function connect(name){
     keepAliveTimer=setInterval(()=>{
       if(ws&&ws.readyState===1){try{ws.send(JSON.stringify({action:'ping'}))}catch(e){}}
     },20000);
+    // Сессия ведущего переживает переподключение: код лежит локально,
+    // сервер подтверждает его заново.
+    if(gmToken){gmSilentAuth=true;ws.send(JSON.stringify({action:'gm_auth',gm_token:gmToken}));}
   };
   ws.onmessage=e=>handleMessage(JSON.parse(e.data));
   ws.onclose=()=>{
@@ -76,7 +79,22 @@ $("join-btn").onclick=()=>{
   connect(name);
 };
 $("name-input")?.addEventListener('keydown',e=>{if(e.key==='Enter')$('join-btn').click()});
-function handleMessage(msg){if(msg.type==='pong'){return}if(msg.type==='to_lobby'){returnToLobby();return}if(msg.type==='kicked'){handleKicked(msg);return}if(msg.type==='joined'){myId=msg.player_id;localStorage.setItem('krutagidon_pid_'+roomId,myId);$('lobby-room-code').textContent=roomId;$('room-code-game').textContent=roomId;const l=$('lobby-link');if(l)l.value=inviteUrl(roomId);if(!msg.returning)show('lobby-screen')}else if(msg.type==='lobby'){renderLobby(msg);if(msg.started)show('game-screen')}else if(msg.type==='state'){const motion=captureVisualMotion(msg.state.visual_event);lastState=msg.state;show('game-screen');render(msg.state);prepareVisualMotion(motion);requestAnimationFrame(()=>playVisualMotion(motion,msg.state.visual_event))}else if(msg.type==='error'){playSound('error');alert(msg.message)}}
+function handleMessage(msg){if(msg.type==='pong'){return}
+  if(msg.type==='gm_auth'){
+    if(msg.ok){
+      const wasSilent=gmSilentAuth;gmSilentAuth=false;
+      gmUnlocked=true;localStorage.setItem('krutagidon_gm',gmToken);
+      $('gm-auth-modal').classList.add('hidden');$('gm-auth-input').value='';
+      // Тихое подтверждение после реконнекта не должно лезть на экран.
+      if(!wasSilent){gmToast('Режим ведущего включён');gmOpen()}
+    }else{
+      const wasSilent=gmSilentAuth;gmSilentAuth=false;
+      gmUnlocked=false;gmToken='';localStorage.removeItem('krutagidon_gm');
+      if(!wasSilent)gmToast('Неверный код',true);
+    }
+    return;
+  }
+  if(msg.type==='gm_ok'){gmToast(msg.message||'Готово');return}if(msg.type==='to_lobby'){returnToLobby();return}if(msg.type==='kicked'){handleKicked(msg);return}if(msg.type==='joined'){myId=msg.player_id;localStorage.setItem('krutagidon_pid_'+roomId,myId);$('lobby-room-code').textContent=roomId;$('room-code-game').textContent=roomId;const l=$('lobby-link');if(l)l.value=inviteUrl(roomId);if(!msg.returning)show('lobby-screen')}else if(msg.type==='lobby'){renderLobby(msg);if(msg.started)show('game-screen')}else if(msg.type==='state'){const motion=captureVisualMotion(msg.state.visual_event);lastState=msg.state;show('game-screen');render(msg.state);if(gmUnlocked&&!$('gm-modal').classList.contains('hidden'))gmRefreshPlayers();prepareVisualMotion(motion);requestAnimationFrame(()=>playVisualMotion(motion,msg.state.visual_event))}else if(msg.type==='error'){playSound('error');alert(msg.message)}}
 function show(id){['join-screen','lobby-screen','game-screen'].forEach(s=>$(s).classList.toggle('hidden',s!==id))}
 /* Хост убрал игрока из комнаты: не переподключаемся молча (v74) */
 function handleKicked(msg){
@@ -678,10 +696,13 @@ function askPayment(card,onPay){
   const me=lastState?.players.find(p=>p.id===myId);
   if(!me)return;
   let cost=card.cost;
-  if(me.property_id==='svo_1'&&/Сокровище/.test(card.type||''))cost=Math.max(0,cost-1);
+  // Скидка «на сокровища» не действует на Дохляков — это отдельный тип карт.
+  if(me.property_id==='svo_1'&&card.type!=='Дохляк'&&(/Сокровище/.test(card.type||'')||/Сокровище/.test(card.legend_subtype||'')))cost=Math.max(0,cost-1);
   const power=me.power_available,chips=me.chipsines;
   // Чипсинами платят только за легенды и фамильяров.
   const isLegend=/Легенда/.test(card.type||'')||(lastState?.legend_market||[]).some(c=>c.id===card.id);
+  // «Эпичный мерч боевых магов»: −2 к цене легенд в этом ходу.
+  if(isLegend)cost=Math.max(0,cost-(me.legend_discount||0));
   if(!isLegend){
     if(cost>power){alert('За эту карту чипсинами платить нельзя — не хватает мощи');return}
     onPay(0);return;
@@ -835,3 +856,142 @@ function confirmActivation(card,onYes){
 }
 function sendPermanentActivation(card,params){playSound('card');ws.send(JSON.stringify({action:'activate_permanent',card_id:card.id,params}))}
 
+
+/* ===================================================================== *
+ *  СКРЫТАЯ ПАНЕЛЬ ВЕДУЩЕГО (debug-режим)
+ *
+ *  Открывается сочетанием Ctrl+Shift+G (или тройным быстрым нажатием ~).
+ *  Другие игроки её не видят: в интерфейсе нет ни кнопки, ни намёка.
+ *  Но главная защита — серверная: без верного кода из gm_token.txt сервер
+ *  просто отвечает «Неизвестное действие», сколько бы кнопок ни нажимали
+ *  через DevTools. Боты сюда не попадают вовсе — у них нет соединения.
+ * ===================================================================== */
+let gmToken=localStorage.getItem('krutagidon_gm')||'';
+let gmUnlocked=false, gmRefdata=null, gmSilentAuth=false;
+
+function gmToast(text,bad){
+  const el=document.createElement('div');
+  el.className='gm-toast';
+  if(bad)el.style.background='#ff9f9f';
+  el.textContent=text;
+  document.body.append(el);
+  setTimeout(()=>el.remove(),2600);
+}
+
+function gmSend(command,params){
+  if(!gmUnlocked)return;
+  ws.send(JSON.stringify({action:'gm_command',gm_token:gmToken,command,params:params||{}}));
+}
+
+function gmAuth(token){
+  gmSilentAuth=false;
+  gmToken=token;
+  ws.send(JSON.stringify({action:'gm_auth',gm_token:token}));
+}
+
+async function gmLoadRefdata(){
+  if(gmRefdata)return gmRefdata;
+  try{
+    const res=await fetch(`gm/refdata?token=${encodeURIComponent(gmToken)}`);
+    const data=await res.json();
+    if(data.error)return null;
+    gmRefdata=data;
+  }catch(e){return null}
+  return gmRefdata;
+}
+
+function gmFillCards(filter){
+  const sel=$('gm-card');
+  if(!gmRefdata)return;
+  const q=(filter||'').trim().toLowerCase();
+  const list=gmRefdata.cards.filter(c=>!q||c.name.toLowerCase().includes(q)||c.id.includes(q)).slice(0,300);
+  sel.replaceChildren(...list.map(c=>{
+    const o=document.createElement('option');
+    o.value=c.id;o.textContent=`${c.name} · ${c.type}`;
+    return o;
+  }));
+}
+
+function gmRefreshPlayers(){
+  if(!lastState)return;
+  const sel=$('gm-player'),killerSel=$('gm-killer');
+  const keep=sel.value,keepK=killerSel.value;
+  sel.replaceChildren(...lastState.players.map(p=>{
+    const o=document.createElement('option');
+    o.value=p.id;
+    o.textContent=`${p.avatar||''} ${p.name} · ♥${p.life}/${p.max_life} ⚡${p.power_available} ◉${p.chipsines}${p.controls_prize?' 🏆':''}${p.is_loshara?' (лошара)':''}`;
+    return o;
+  }));
+  if(keep)sel.value=keep;
+  const none=document.createElement('option');
+  none.value='';none.textContent='— без убийцы —';
+  killerSel.replaceChildren(none,...lastState.players.map(p=>{
+    const o=document.createElement('option');o.value=p.id;o.textContent=p.name;return o;
+  }));
+  if(keepK)killerSel.value=keepK;
+  const me=lastState.players.find(p=>p.id===sel.value);
+  $('gm-player-info').textContent=me?`жетонов ЖДК: ${me.death_tokens} · на руке: ${me.hand_count}`:'';
+}
+
+function gmFillTokens(){
+  if(!gmRefdata)return;
+  $('gm-token').replaceChildren(...gmRefdata.tokens.map(t=>{
+    const o=document.createElement('option');o.value=t.id;o.textContent=`${t.name} (${t.id})`;return o;
+  }));
+}
+
+async function gmOpen(){
+  if(!gmUnlocked){$('gm-auth-modal').classList.remove('hidden');$('gm-auth-input').focus();return}
+  await gmLoadRefdata();
+  gmFillCards('');gmFillTokens();gmRefreshPlayers();
+  $('gm-modal').classList.remove('hidden');
+}
+
+/* --- хоткеи: Ctrl+Shift+G, либо три быстрых нажатия «~»/«ё» --- */
+let gmTildeHits=[];
+document.addEventListener('keydown',(e)=>{
+  const typing=/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName||'');
+  if(e.ctrlKey&&e.shiftKey&&(e.code==='KeyG')){e.preventDefault();gmOpen();return}
+  if(!typing&&(e.key==='~'||e.key==='`'||e.key==='ё'||e.key==='Ё')){
+    const now=Date.now();
+    gmTildeHits=gmTildeHits.filter(t=>now-t<900);
+    gmTildeHits.push(now);
+    if(gmTildeHits.length>=3){gmTildeHits=[];gmOpen()}
+  }
+  if(e.key==='Escape'){$('gm-modal')?.classList.add('hidden');$('gm-auth-modal')?.classList.add('hidden')}
+});
+
+/* --- обработчики панели --- */
+(function bindGm(){
+  const authGo=()=>{
+    const v=$('gm-auth-input').value.trim();
+    if(!v)return;
+    gmAuth(v);
+  };
+  $('gm-auth-go').onclick=authGo;
+  $('gm-auth-input').onkeydown=(e)=>{if(e.key==='Enter')authGo()};
+  $('gm-auth-close').onclick=()=>$('gm-auth-modal').classList.add('hidden');
+  $('gm-close').onclick=()=>$('gm-modal').classList.add('hidden');
+  $('gm-player').onchange=gmRefreshPlayers;
+  $('gm-card-search').oninput=(e)=>gmFillCards(e.target.value);
+
+  document.querySelectorAll('[data-gm]').forEach(btn=>{
+    btn.onclick=()=>{
+      const cmd=btn.dataset.gm;
+      const pid=$('gm-player').value;
+      const amount=Number($('gm-amount').value||0);
+      const params={player_id:pid};
+      if(cmd==='add_power'||cmd==='add_chips'||cmd==='add_life'||cmd==='draw')params.amount=amount;
+      if(cmd==='set_life')params.value=Number($('gm-life').value||0);
+      if(cmd==='kill')params.killer_id=$('gm-killer').value||null;
+      if(cmd==='set_loshara')params.value=btn.dataset.value==='1';
+      if(cmd==='add_token'||cmd==='remove_token')params.token_id=$('gm-token').value;
+      if(cmd==='give_card'||cmd==='remove_card'){
+        params.card_id=$('gm-card').value;
+        params.destination=$('gm-card-dest').value;
+      }
+      if(cmd==='finish_game'&&!confirm('Точно завершить партию и посчитать очки?'))return;
+      gmSend(cmd,params);
+    };
+  });
+})();

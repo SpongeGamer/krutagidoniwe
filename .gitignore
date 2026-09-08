@@ -29,3 +29,5 @@ package-lock.json
 tests/e2e_*.js
 tests/burn_preview.html
 tests/live_captain_check.py
+gm_token.txt
+ПАНЕЛЬ ВЕДУЩЕГО.md

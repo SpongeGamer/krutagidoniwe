@@ -10,6 +10,7 @@ from typing import Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 
+from . import gm
 from .game import GameState, START_LIFE
 from .models import load_all_cards
 
@@ -445,6 +446,31 @@ async def ws_endpoint(websocket: WebSocket, room_id: str):
                     pass
                 continue
 
+            # --- Скрытая панель ведущего -------------------------------
+            # Работает ТОЛЬКО с верным токеном. Без него сервер отвечает
+            # обычной ошибкой и ничем не выдаёт, что режим вообще есть.
+            if action == "gm_command":
+                if not gm.check_token(msg.get("gm_token")):
+                    await websocket.send_json({"type": "error",
+                                               "message": "Неизвестное действие"})
+                    continue
+                res = gm.apply(room.game, msg.get("command", ""),
+                               msg.get("params") or {},
+                               gm_name=f"Ведущий ({room.player_names.get(player_id, 'хост')})")
+                if res.get("error"):
+                    await websocket.send_json({"type": "error", "message": res["error"]})
+                else:
+                    await websocket.send_json({"type": "gm_ok", "message": res.get("message", "")})
+                    await room.broadcast()
+                continue
+
+            # Проверка токена ведущего: клиент спрашивает, открывать ли панель.
+            # Отвечаем и до старта партии — токен проверяется в лобби тоже.
+            if action == "gm_auth":
+                await websocket.send_json({"type": "gm_auth",
+                                           "ok": gm.check_token(msg.get("gm_token"))})
+                continue
+
             # --- Пауза: доступна всем, останавливает партию для отдыха ---
             if action == "toggle_pause":
                 if room.offline:
@@ -460,7 +486,9 @@ async def ws_endpoint(websocket: WebSocket, room_id: str):
                 continue
 
             # Пока стоит пауза, игровые действия не проходят.
-            if room.started and room.paused and action not in {"toggle_pause"}:
+            # Ведущему пауза не мешает: чинить стол чаще всего надо именно
+            # тогда, когда партия остановлена из-за бага.
+            if room.started and room.paused and action not in {"toggle_pause", "gm_command", "gm_auth"}:
                 await websocket.send_json({
                     "type": "error",
                     "message": room.pause_info().get("reason", "Партия на паузе"),
@@ -686,6 +714,26 @@ async def ws_endpoint(websocket: WebSocket, room_id: str):
                 humans = [p for p in room.player_names if not room.is_bot(p)]
                 room.host_id = humans[0] if humans else None
             await room.broadcast_lobby()
+
+
+@app.get("/gm/refdata")
+async def gm_refdata(token: str = ""):
+    """Справочник карт и жетонов для панели ведущего.
+
+    Отдаётся только по верному токену: обычный игрок, наткнувшись на адрес,
+    получит такой же ответ, как на несуществующую страницу.
+    """
+    if not gm.check_token(token):
+        return {"error": "not found"}
+    with open(os.path.join(_DATA_DIR, "zhdk.json"), encoding="utf-8") as f:
+        tokens = json.load(f)
+    return {
+        "cards": sorted(
+            [{"id": c.id, "name": c.name, "type": c.type} for c in ALL_CARDS.values()],
+            key=lambda c: (c["type"], c["name"]),
+        ),
+        "tokens": [{"id": t["id"], "name": t.get("name", t["id"])} for t in tokens],
+    }
 
 
 class NoCacheStaticFiles(StaticFiles):

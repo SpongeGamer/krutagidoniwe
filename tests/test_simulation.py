@@ -321,21 +321,14 @@ def test_all_death_tokens_resolve():
             assert p.chipsines >= 0, f"{tid}: отрицательные чипсины"
 
 
-def test_prize_gives_victory_points():
-    """Главный приз даёт +5 ПО, жетон dk_8 этот бонус снимает."""
+def test_prize_gives_no_victory_points():
+    """Главный приз победных очков НЕ приносит (правка правил)."""
     game = GameState(["A", "B"], seed=1)
     holder, other = game.players
     holder.controls_prize = True
     game._finish_game()
-    assert game.final_scores[holder.id]["vp"] - game.final_scores[other.id]["vp"] == 5
-
-    game2 = GameState(["A", "B"], seed=1)
-    h2, o2 = game2.players
-    h2.controls_prize = True
-    h2.death_tokens = ["dk_8"]
-    game2._finish_game()
-    # приза нет, зато есть штраф жетона
-    assert game2.final_scores[h2.id]["vp"] < game2.final_scores[o2.id]["vp"]
+    assert game.final_scores[holder.id]["vp"] == game.final_scores[other.id]["vp"]
+    assert all(s["kind"] != "prize" for s in game.final_scores[holder.id]["steps"])
 
 
 def test_final_scores_reach_frontend():

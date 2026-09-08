@@ -23,7 +23,7 @@ def _destroy_choice(game, player, title, text, zones, after=None):
 
 @effect("beast_spineeaters")
 def spineeaters(game, player, card, **kw):
-    if game.count_controlled_type(player, "Тварь", card.id) >= 1 and not kw.get("attack_only", False):
+    if game.has_extra_of_type(player, "Тварь", card.id) and not kw.get("attack_only", False):
         _destroy_choice(game, player, "Спиногрызогрызы", "Есть ещё одна тварь. Можешь уничтожить карту с руки или из сброса.", ["hand", "discard"])
 
 

@@ -93,6 +93,8 @@ class Player:
     # Постоянки с атакой (например «Трондец») бьют ОДИН раз за свой ход.
     used_activations: list = field(default_factory=list)
     brotality_active: bool = False          # «Браталити»: убитый не получит жетон ЖДК
+    legend_discount_turn: int = 0           # скидка на легенды в этом ходу («Эпичный мерч»)
+    market_to_hand_turn: bool = False       # покупки этого хода идут сразу в руку
     damage_dealt_this_turn: int = 0         # для «Ультимативного тронадо»
     first_damage_bonus_done: bool = False
 
@@ -303,11 +305,26 @@ class GameState:
         """Карты под контролем в текущий момент: сыгранные в ход и постоянки."""
         return player.zone_in_play + player.in_play_this_turn
 
-    def count_controlled_type(self, player: Player, card_type: str, exclude_id: Optional[str] = None) -> int:
-        return sum(
-            1 for cid in self.controlled_card_ids(player)
-            if cid != exclude_id and card_type in self.cards[cid].types_for_matching
-        )
+    def count_controlled_type(self, player: Player, card_type: str, exclude_id: Optional[str] = None,
+                              include_hand: bool = False) -> int:
+        """Сколько карт нужного типа сейчас «есть» у игрока.
+
+        exclude_id исключает РОВНО ОДИН экземпляр (саму разыгранную карту),
+        а не все копии с тем же id: раньше вторая такая же тварь на столе
+        не засчитывалась, и «если есть ещё 1 тварь» молча не срабатывало.
+        include_hand=True добавляет карты на руке — так считаются условия
+        вида «если у тебя есть ещё хотя бы 1 тварь».
+        """
+        ids = list(self.controlled_card_ids(player))
+        if include_hand:
+            ids += list(player.hand)
+        if exclude_id and exclude_id in ids:
+            ids.remove(exclude_id)      # убираем один экземпляр, не все копии
+        return sum(1 for cid in ids if card_type in self.cards[cid].types_for_matching)
+
+    def has_extra_of_type(self, player: Player, card_type: str, card_id: Optional[str] = None) -> bool:
+        """«Если под твоим контролем есть ещё хотя бы 1 <тип>» — с учётом руки."""
+        return self.count_controlled_type(player, card_type, card_id, include_hand=True) >= 1
 
     def heal(self, player: Player, amount: int):
         player.life = min(player.max_life, player.life + max(0, amount))
@@ -860,9 +877,15 @@ class GameState:
             return {"error": "Этой карты нет на барахолке"}
         card = self.cards[card_id]
         effective_cost = card.cost
-        if player.property_id == "svo_1" and "Сокровище" in card.types_for_matching:
+        # Скидка «на сокровища» (svo_1) — только для настоящих сокровищ.
+        # Дохляки (тип «Дохляк») сокровищами НЕ являются: раньше их можно было
+        # утащить с барахолки за 0 мощи.
+        if (player.property_id == "svo_1" and card.type != "Дохляк"
+                and "Сокровище" in card.types_for_matching):
             effective_cost = max(0, effective_cost - 1)
-        if card_id in self.legend_market:
+        # Скидка «Эпичного мерча боевых магов» действует на любую легенду,
+        # где бы она ни лежала (в том числе на «Легенда — Сокровище»).
+        if card_id in self.legend_market or "Легенда" in card.types_for_matching:
             effective_cost = max(0, effective_cost - getattr(player, "legend_discount_turn", 0))
         # Чипсинами доплачивают ТОЛЬКО за легенды и фамильяров.
         # Обычные карты барахолки покупаются исключительно за мощь.
@@ -1340,6 +1363,29 @@ class GameState:
                     lambda e: f"Показать средний палец игроку {player.name}?",
                     finger_opts, finger_apply)
 
+    def _revive_life(self, player: Player) -> int:
+        """Сколько жизней у колдуна после воскрешения.
+
+        Обычный колдун — 20, лошара — 15, а владелец свойства «Главный приз»
+        (svo_6), если он не лошара, возвращается с полными 25.
+        """
+        if player.is_loshara:
+            return LOSHARA_MAX_LIFE
+        if player.property_id == "svo_6":
+            return MAX_LIFE
+        return START_LIFE
+
+    def _pass_prize(self, victim: Player, killer: Optional[Player]):
+        """Главный приз переходит ТОЛЬКО к тому, кто убил его владельца."""
+        if not killer or killer.id == victim.id:
+            return
+        if not victim.controls_prize or self.prize_holder != victim.id:
+            return
+        victim.controls_prize = False
+        killer.controls_prize = True
+        self.prize_holder = killer.id
+        self.log(f"{killer.name} отбирает главный приз Крутагидона у {victim.name}")
+
     def _handle_death(self, player: Player, killer: Optional[Player]):
         player.just_died = True
         token_id = None
@@ -1347,15 +1393,8 @@ class GameState:
         if killer and getattr(killer, "brotality_active", False):
             killer.brotality_active = False
             self.log(f"{player.name} подох, но «Браталити» избавляет его от жетона")
-            player.life = START_LIFE if not player.is_loshara else LOSHARA_MAX_LIFE
-            if killer.id != player.id:
-                if self.prize_holder:
-                    old_holder = self.get_player(self.prize_holder)
-                    if old_holder:
-                        old_holder.controls_prize = False
-                killer.controls_prize = True
-                self.prize_holder = killer.id
-                self.log(f"{killer.name} получает главный приз Крутагидона")
+            player.life = self._revive_life(player)
+            self._pass_prize(player, killer)
             return
         if self.undead_token_stack:
             token_id = self.undead_token_stack.pop()
@@ -1382,19 +1421,12 @@ class GameState:
             else:
                 self.pending_event = token_event
                 self._pending_event_card = None
-        player.life = START_LIFE if not player.is_loshara else LOSHARA_MAX_LIFE
+        player.life = self._revive_life(player)
         if token_id:
             self._resolve_death_token(player, token_id, killer)
             # Любой жетон не должен оставлять игрока выше нового максимума HP.
             player.life = min(player.life, player.max_life)
-        if killer and killer.id != player.id:
-            if self.prize_holder:
-                old = self.get_player(self.prize_holder)
-                if old:
-                    old.controls_prize = False
-            killer.controls_prize = True
-            self.prize_holder = killer.id
-            self.log(f"{killer.name} получает главный приз Крутагидона")
+        self._pass_prize(player, killer)
 
     # ------------------------------------------------------------------ #
     # Подсчёт очков
@@ -1470,11 +1502,8 @@ class GameState:
                     steps.append({"label": f"↳ в том числе фамильяр «{fam.name}»",
                                   "delta": 0, "kind": "note",
                                   "note": f"+{fam.vp} ПО уже учтены в картах"})
-            # Главный приз Крутагидона даёт +5 ПО владельцу.
-            # Жетон «Неглавный приз» (dk_8) этот бонус отменяет.
-            if p.controls_prize and "dk_8" not in p.death_tokens:
-                vp += 5
-                add_step("Главный приз Крутагидона", 5, "prize")
+            # Главный приз победных очков НЕ даёт — он нужен только ради
+            # чипсины в конце хода и как переходящий трофей.
             if p.is_loshara:
                 vp -= 5
                 add_step("Ты лошара", -5, "bad")
@@ -1523,7 +1552,8 @@ class GameState:
     def to_public_dict(self, viewer_id: Optional[str] = None) -> dict:
         def card_brief(cid):
             c = self.cards[cid]
-            return {"id": c.id, "name": c.name, "type": c.type, "cost": c.cost,
+            return {"id": c.id, "name": c.name, "type": c.type,
+                    "legend_subtype": c.legend_subtype, "cost": c.cost,
                     "power": c.power, "vp": c.vp, "has_attack": c.has_attack,
                     "activation": c.activation or c.id in {"beast_jaba", "spell_magicspill", "wiz_marmemage", "leg_throne"},
                     "text": c.full_text, "photo": c.photo}
@@ -1535,6 +1565,9 @@ class GameState:
                 "chipsines": p.chipsines, "is_loshara": p.is_loshara,
                 "controls_prize": p.controls_prize,
                 "power_available": p.power_available,
+                # Скидка на легенды в этом ходу («Эпичный мерч боевых магов»):
+                # без неё клиент считал полную цену и не давал купить.
+                "legend_discount": getattr(p, "legend_discount_turn", 0),
                 "hand_count": len(p.hand),
                 "deck_count": len(p.deck), "discard_count": len(p.discard),
                 "zone_in_play": [card_brief(c) for c in p.zone_in_play],

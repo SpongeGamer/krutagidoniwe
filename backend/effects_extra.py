@@ -17,13 +17,13 @@ def kinky(game, player, card, **kw):
 
 @effect("beast_spanish")
 def spanish(game, player, card, **kw):
-    if kw.get("use_attack", True) and game.count_controlled_type(player, "Тварь", card.id) >= 1:
+    if kw.get("use_attack", True) and game.has_extra_of_type(player, "Тварь", card.id):
         game.attack_target(player, card, kw.get("target_id"), 9)
 
 
 @effect("beast_peyot")
 def peyot(game, player, card, **kw):
-    if game.count_controlled_type(player, "Тварь", card.id) >= 1:
+    if game.has_extra_of_type(player, "Тварь", card.id):
         player.chipsines += 1
 
 
