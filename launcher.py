@@ -41,11 +41,53 @@ CF_URLS = {
 }
 
 
+# Консоль Windows по умолчанию живёт в cp866, где нет ни «ёлочек», ни тире,
+# ни многоточия. Без этой настройки печать русского текста падала с
+# UnicodeEncodeError прямо посреди запуска. Переводим вывод в UTF-8, а если
+# терминал древний и так не умеет — подставляем ASCII-замены.
+def _setup_console() -> bool:
+    ok = True
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            ok = False
+    if os.name == "nt":
+        try:
+            # Кодовая страница 65001 = UTF-8: нужна, чтобы cmd.exe показывал
+            # кириллицу, а не «крокозябры».
+            subprocess.run(["chcp", "65001"], shell=True,
+                           capture_output=True, timeout=5)
+        except Exception:
+            pass
+    return ok
+
+
+_CONSOLE_UTF8 = _setup_console()
+
+# Чем заменить символы, которых нет в cp866.
+_FALLBACK = {
+    "\u2500": "-", "\u2501": "-", "\u2550": "=",
+    "\u2026": "...", "\u2014": "-", "\u2013": "-",
+    "\u00ab": '"', "\u00bb": '"', "\u2022": "*",
+    "\u2192": "->", "\u2713": "v", "\u2717": "x",
+}
+
+
 def say(text: str = "") -> None:
-    print(text, flush=True)
+    try:
+        print(text, flush=True)
+    except UnicodeEncodeError:
+        # Терминал не осилил символ — заменяем и печатаем то, что можем.
+        safe = text
+        for src, dst in _FALLBACK.items():
+            safe = safe.replace(src, dst)
+        encoding = getattr(sys.stdout, "encoding", None) or "ascii"
+        safe = safe.encode(encoding, errors="replace").decode(encoding, errors="replace")
+        print(safe, flush=True)
 
 
-def line(char: str = "─") -> None:
+def line(char: str = "\u2500") -> None:
     say(char * 62)
 
 
@@ -133,17 +175,35 @@ def install_deps() -> bool:
     except ImportError:
         pass
     say("Первый запуск: доустанавливаю библиотеки (займёт полминуты)…")
-    try:
-        subprocess.run(
-            [sys.executable, "-m", "pip", "install", "-q", "-r", str(ROOT / "requirements.txt")],
-            check=True,
-        )
-        return True
-    except subprocess.CalledProcessError:
-        say("Не получилось установить библиотеки.")
-        say("Проверь интернет и запусти вручную:")
-        say(f"    {sys.executable} -m pip install -r requirements.txt")
-        return False
+    req = str(ROOT / "requirements.txt")
+
+    # У свежепоставленного Python pip иногда отсутствует — поднимаем его.
+    if subprocess.run([sys.executable, "-m", "pip", "--version"],
+                      capture_output=True).returncode != 0:
+        say("Готовлю установщик пакетов…")
+        subprocess.run([sys.executable, "-m", "ensurepip", "--upgrade"],
+                       capture_output=True)
+
+    # Обычная установка, затем — в пользовательскую папку: без прав
+    # администратора «в Program Files» pip иногда отказывается писать.
+    attempts = [
+        [sys.executable, "-m", "pip", "install", "-q", "-r", req],
+        [sys.executable, "-m", "pip", "install", "-q", "--user", "-r", req],
+    ]
+    last = None
+    for cmd in attempts:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            return True
+        last = result
+
+    say("Не получилось установить библиотеки.")
+    if last is not None and (last.stderr or "").strip():
+        say(f"Причина: {(last.stderr or '').strip().splitlines()[-1][:200]}")
+    say("Чаще всего это антивирус или отсутствие интернета.")
+    say("Можно поставить вручную:")
+    say(f"    {sys.executable} -m pip install -r requirements.txt")
+    return False
 
 
 def cloudflared_path() -> Path | None:
