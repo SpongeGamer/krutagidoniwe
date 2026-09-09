@@ -142,6 +142,9 @@ class GameState:
         # Карта Беспредела/Мегабеспредела показана всем до выполнения эффекта.
         self.pending_event: Optional[dict] = None
         self._pending_event_card: Optional[Card] = None
+        # Кто уже нажал «понятно» на текущем Беспределе. Раньше окно закрывал
+        # один игрок — и оно исчезало у всех, остальные не успевали дочитать.
+        self.event_viewers: set = set()
         self._event_sequence = 0
         self.event_queue: list[dict] = []
         self._refilling_markets = False
@@ -149,6 +152,11 @@ class GameState:
         # Callback живёт только в памяти текущей комнаты, что подходит модели без БД.
         self.pending_decision: Optional[dict] = None
         self._decision_callback: Optional[Callable] = None
+        # Очередь отложенных решений. Пока она была одной переменной,
+        # вложенный эффект (например Шальная магия, вытянувшая Трондец)
+        # затирал предыдущий вопрос: старый выбор исчезал, а вместо него
+        # срабатывал чужой эффект. Теперь всё, что не влезло, ждёт очереди.
+        self._decision_stack: list[tuple] = []
         self.last_damage_target_id: Optional[str] = None
 
         self._setup()
@@ -454,7 +462,7 @@ class GameState:
         options: [{id, label, detail?}]. Сами карты/цели остаются валидируемыми
         на сервере в callback — клиент лишь выбирает один из уже предложенных id.
         """
-        self.pending_decision = {
+        payload = {
             "player_id": player.id,
             "player_name": player.name,
             "title": title,
@@ -463,6 +471,12 @@ class GameState:
             # Раскрытые карты отправляются только игроку, которому адресовано решение.
             "revealed_cards": revealed_cards or [],
         }
+        if self.pending_decision is not None:
+            # Уже висит незакрытый вопрос — новый встаёт в очередь,
+            # иначе игрок терял свой выбор посреди эффекта.
+            self._decision_stack.append((payload, callback))
+            return
+        self.pending_decision = payload
         self._decision_callback = callback
 
     def resolve_decision(self, player: Player, option_id: str) -> dict:
@@ -479,6 +493,13 @@ class GameState:
         self._decision_callback = None
         if callback:
             callback(str(option_id))
+        # Эффект мог поставить новые вопросы — они уже в pending_decision.
+        # Если нет, достаём отложенный из очереди.
+        if self.pending_decision is None and self._decision_stack:
+            payload, queued = self._decision_stack.pop(0)
+            self.pending_decision = payload
+            self._decision_callback = queued
+            return {"ok": True}
         self._resume_market_refill()
         return {"ok": True}
 
@@ -622,13 +643,29 @@ class GameState:
             "seq": self._event_sequence,
         }
         self._pending_event_card = card
+        self.event_viewers.clear()
         self.log(f"{card.type.upper()} показан: {card.full_text}")
 
-    def resolve_event(self) -> dict:
+    def _event_waiting_for(self) -> list:
+        """Живые люди, которые ещё не закрыли текущее окно события."""
+        return [p for p in self.players
+                if p.is_alive() and p.id not in self.event_viewers]
+
+    def resolve_event(self, player: Optional[Player] = None) -> dict:
         if not self.pending_event:
             # Обычно это второй клик по кнопке или запоздавший клик,
             # когда событие уже закрыл бот. Молча игнорируем.
             return {"ok": True}
+
+        # Каждый игрок закрывает окно сам. Пока кто-то не нажал «понятно»,
+        # событие висит: раньше первый же клик убирал Беспредел у всех.
+        if player is not None:
+            self.event_viewers.add(player.id)
+            if self._event_waiting_for():
+                return {"ok": True, "waiting": True}
+
+        self.event_viewers.clear()
+
         # Показ жетона ЖДК — просто информационное окно, карты за ним нет.
         if not self._pending_event_card:
             self.pending_event = None
@@ -790,7 +827,11 @@ class GameState:
             handler(self, player, card, **kwargs)
 
     # Карты, которые бьют по площади или выбирают цель сами внутри эффекта.
-    NO_TARGET_CARDS = {"leg_minigun", "leg_necrorot", "fam_weaboo", "leg_hemor",
+    # Карты, которые бьют по площади («каждому врагу») или выбирают цель
+    # сами внутри эффекта. Спрашивать у них одну цель нельзя.
+    # ВАЖНО: leg_minigun сюда НЕ входит — он бьёт по ВЫБРАННЫМ колдунам
+    # и сам спрашивает цель для каждого из четырёх выстрелов.
+    NO_TARGET_CARDS = {"leg_necrorot", "fam_weaboo", "leg_hemor",
                        "leg_rabbit", "leg_shitcher", "beast_kinky",
                        "spell_dirtwind", "wiz_bandits", "wiz_sosok"}
 
@@ -980,6 +1021,22 @@ class GameState:
             return {"error": "Сейчас не ваш ход"}
         if self.pending_event or self.pending_attack or self.pending_decision:
             return {"error": "Сначала завершите текущий выбор или атаку"}
+        # Дохляки (sdk_*) — постоянки, считающиеся жетонами ЖДК.
+        # По правилам стола игрок получает чипсину за КАЖДЫЙ свой жетон
+        # в конце каждого хода, пока Дохляк лежит на столе. Раньше чипсины
+        # выдавались только один раз при розыгрыше карты.
+        dohlyaki = [cid for cid in player.zone_in_play if cid.startswith("sdk_")]
+        if dohlyaki:
+            # Жетоны + сами Дохляки на столе: каждый считается жетоном ЖДК.
+            tokens = len([t for t in player.death_tokens if not t.startswith("sdk_")])
+            per_card = tokens + len(dohlyaki)
+            gain = per_card * len(dohlyaki)
+            if gain:
+                player.chipsines += gain
+                names = ", ".join(self.cards[c].name for c in dohlyaki)
+                self.log(f"{player.name}: {names} — +{gain} чипсин(ы) "
+                         f"(всего {player.chipsines})")
+
         # Владелец Главного приза получает чипсину в конце своего хода.
         if player.controls_prize:
             player.chipsines += 1
@@ -1067,6 +1124,15 @@ class GameState:
             return True
         return False
 
+    def _strip_self(self, source: Player, players: list) -> list:
+        """Убрать самого атакующего из списка целей.
+
+        Игроки регулярно промахивались по кнопке и били сами себя. Атака —
+        это всегда действие ПРОТИВ врага, поэтому себя в целях быть не может.
+        Исключение — лечебные/самонаправленные карты, они не идут через атаку.
+        """
+        return [p for p in players if p is not None and p.id != source.id]
+
     def declare_attack(self, source: Player, card: Card, targets, amount: int,
                        unavoidable: bool = False, on_hit: Optional[Callable] = None):
         """Начать атаку. Цели разрешаются по одной, с окном защиты у каждой."""
@@ -1090,12 +1156,23 @@ class GameState:
         if not targets:
             return
         entries = []
+        skipped_self = False
         for target in targets:
             if isinstance(target, tuple):
                 player, target_amount = target
             else:
                 player, target_amount = target, amount
+            # Атака никогда не бьёт по своему хозяину: игроки постоянно
+            # промахивались по кнопке и убивали сами себя. Перенаправление
+            # атаки на себя тоже отсекается — оно идёт отдельным путём.
+            if player is None or player.id == source.id:
+                skipped_self = True
+                continue
             entries.append({"id": player.id, "amount": target_amount})
+        if not entries:
+            if skipped_self:
+                self.log(f"{source.name}: «{card.name}» — по себе бить нельзя, атака отменена")
+            return
         if getattr(source, "next_attack_unavoidable", False):
             unavoidable = True
             source.next_attack_unavoidable = False
@@ -1164,13 +1241,26 @@ class GameState:
                 self._apply_attack_damage(source, target)
             card_obj = self.cards.get(attack.get("card_id"))
             is_besp = bool(card_obj and card_obj.type in ("Беспредел", "Мегабеспредел"))
+            # Что именно делает атака: урон — не единственный её эффект,
+            # бывает залошаривание, вялые палочки, кража. Игрок выбирает
+            # защиту, не видя стола, поэтому текст карты показываем прямо тут.
+            effect_text = ""
+            if card_obj:
+                effect_text = (card_obj.attack_text or "").strip() or (card_obj.full_text or "").strip()
+            damage_part = f"{amount} урона" if amount else "без прямого урона"
             if is_besp:
                 title = f"{attack['card_name']} бьёт!"
-                text = f"Беспредел наносит тебе {amount} урона. Использовать защиту?"
+                text = f"Беспредел наносит тебе {damage_part}."
             else:
                 title = f"Атака: {attack['card_name']}"
-                text = f"{source.name} атакует тебя на {amount} урона. Использовать защиту?"
-            self.request_decision(target, title, text, options, choose_defense)
+                text = f"{source.name} атакует тебя картой «{attack['card_name']}» — {damage_part}."
+            if effect_text:
+                text += f"\nЧто делает карта: {effect_text}"
+            text += "\nИспользовать защиту?"
+            # Саму карту атаки тоже кладём в окно — её видно в лупе.
+            revealed = [self.card_public(card_obj.id)] if card_obj else None
+            self.request_decision(target, title, text, options, choose_defense,
+                                  revealed_cards=revealed)
         else:
             self._apply_attack_damage(source, target)
 
@@ -1376,10 +1466,29 @@ class GameState:
         return START_LIFE
 
     def _pass_prize(self, victim: Player, killer: Optional[Player]):
-        """Главный приз переходит ТОЛЬКО к тому, кто убил его владельца."""
+        """Куда уходит главный приз после убийства.
+
+        Два случая:
+        1. Приза на столе ещё нет (никто не выбрал свойство «Главный приз») —
+           его забирает ПЕРВЫЙ, кто совершил убийство. Раньше приз в такой
+           партии не появлялся вообще.
+        2. Приз уже у кого-то — он переходит, только если убит сам владелец.
+           Убийство постороннего игрока приз не отбирает.
+        """
         if not killer or killer.id == victim.id:
             return
-        if not victim.controls_prize or self.prize_holder != victim.id:
+        holder = self.get_player(self.prize_holder) if self.prize_holder else None
+        if holder is None or not holder.is_alive() and holder.id != victim.id:
+            holder = None
+        if holder is None:
+            # Приза ни у кого нет — вручаем первому убийце.
+            for other in self.players:
+                other.controls_prize = False
+            killer.controls_prize = True
+            self.prize_holder = killer.id
+            self.log(f"{killer.name} первым совершил убийство и забирает главный приз Крутагидона")
+            return
+        if holder.id != victim.id:
             return
         victim.controls_prize = False
         killer.controls_prize = True
@@ -1603,7 +1712,21 @@ class GameState:
             if viewer_id == self.pending_decision["player_id"]:
                 pending_out = {key: value for key, value in self.pending_decision.items() if key != "player_id"}
             else:
-                pending_out = {"waiting_for": self.pending_decision["player_name"]}
+                # Остальным показываем, ЧЕГО именно ждём: без этого игроки
+                # не понимали, почему партия «замерла» — иконка щита мелькала
+                # слишком быстро, чтобы её заметить.
+                pending_out = {
+                    "waiting_for": self.pending_decision["player_name"],
+                    "waiting_title": self.pending_decision.get("title", ""),
+                }
+
+        # Кто ещё не закрыл окно Беспредела — показываем всем в окне события.
+        event_out = None
+        if self.pending_event:
+            event_out = dict(self.pending_event)
+            waiting = self._event_waiting_for()
+            event_out["waiting_names"] = [p.name for p in waiting]
+            event_out["seen"] = bool(viewer_id and viewer_id in self.event_viewers)
 
         visual_event = None
         if self.last_visual_event:
@@ -1613,7 +1736,7 @@ class GameState:
         return {
             "players": players_out,
             "visual_event": visual_event,
-            "pending_event": self.pending_event,
+            "pending_event": event_out,
             "pending_decision": pending_out,
             "turn_player_id": self.active_player.id,
             "market": [card_brief(c) for c in self.market],

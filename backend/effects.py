@@ -209,7 +209,15 @@ def _vyal(game, player, card, **kw):
 # ---------------------------------------------------------------------------
 
 def _dohlyak_effect(game, player, card, **kw):
-    count = len(player.death_tokens) + 1  # сама карта тоже считается жетоном
+    """Чипсины за каждый жетон ЖДК в момент розыгрыша.
+
+    Дальше карта ложится постоянкой и приносит чипсины в конце КАЖДОГО хода —
+    это считает end_turn(). Раньше выплата была разовой, и у игроков
+    Дохляки «работали один раз».
+    """
+    tokens = len([t for t in player.death_tokens if not t.startswith("sdk_")])
+    already = len([c for c in player.zone_in_play if c.startswith("sdk_")])
+    count = tokens + already + 1   # сама карта тоже считается жетоном
     player.chipsines += count
     game.log(f"{player.name}: {card.name} — получает {count} чипсины (жетонов ЖДК: {count})")
 

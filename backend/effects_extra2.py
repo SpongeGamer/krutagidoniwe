@@ -80,6 +80,8 @@ def vomitcan(game, player, card, **kw):
         player.discard.append(cid)
         targets = [{"id":p.id,"label":p.name,"detail":f"Нанести {revealed.cost} урона"} for p in game.enemies_of(player)]
         def attack(target_id):
-            game.deal_damage(player, target_id, revealed.cost, card.name)
+            # Раньше здесь был deal_damage — прямой урон в обход окна защиты,
+            # поэтому от Пушки-блевушки нельзя было защититься вообще.
+            game.attack_target(player, card, target_id, revealed.cost)
         game.request_decision(player, "Пушка-блевушка", f"Выбери цель для {revealed.cost} урона.", targets, attack)
     game.request_decision(player, "Пушка-блевушка", f"Раскрыта «{revealed.name}» стоимостью {revealed.cost}.", [{"id":"destroy","label":"Уничтожить карту"},{"id":"attack","label":"Атаковать на её стоимость"}], resolve, revealed_cards=[_brief(game, cid)])

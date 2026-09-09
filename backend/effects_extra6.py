@@ -141,7 +141,14 @@ def _fam_hostages(game, player, card, **kw):
 
 @defense("fam_hostages")
 def _def_hostages(game, defender, attacker, card):
+    """Возьми 1 карту и нанеси 6 урона атакующему.
+
+    Контратака раньше отсутствовала: защита только тянула карту.
+    """
     game.draw_cards(defender, 1)
+    if attacker and attacker.is_alive() and attacker.id != defender.id:
+        game.log(f"{defender.name}: Зожложники бьют в ответ — 6 урона {attacker.name}")
+        game.deal_damage(defender, attacker.id, 6, card.name)
 
 
 @defense("fam_suitors")
@@ -152,8 +159,44 @@ def _def_suitors(game, defender, attacker, card):
 
 @defense("fam_mescalito")
 def _def_mescalito(game, defender, attacker, card):
-    """Возьми 1 карту."""
+    """Возьми 1 карту и можешь обменять свой жетон ЖДК на такой же жетон
+    атакующего, применив эффекты обоих.
+
+    Раньше защита только тянула карту: ни обмена, ни эффектов не было.
+    """
     game.draw_cards(defender, 1)
+    if not attacker or attacker.id == defender.id:
+        return
+
+    # Меняться можно только жетонами одного вида — это и есть «такой же».
+    mine = [t for t in defender.death_tokens if not t.startswith("sdk_")]
+    his = [t for t in attacker.death_tokens if not t.startswith("sdk_")]
+    common = [t for t in mine if t in his]
+    if not common:
+        game.log(f"{defender.name}: Мескалито — одинаковых жетонов с "
+                 f"{attacker.name} нет, обмен невозможен")
+        return
+
+    options = [{"id": tid,
+                "label": game.zhdk.get(tid, {}).get("name", tid),
+                "detail": game.zhdk.get(tid, {}).get("effect_text", "")}
+               for tid in dict.fromkeys(common)]
+    options.append({"id": "skip", "label": "Не меняться"})
+
+    def choose(choice: str):
+        if choice == "skip":
+            return
+        name = game.zhdk.get(choice, {}).get("name", choice)
+        game.log(f"{defender.name}: Мескалито обменивает жетон «{name}» "
+                 f"с {attacker.name} — срабатывают эффекты обоих")
+        # Жетоны одинаковые, поэтому сам обмен состава рук не меняет,
+        # а вот эффекты применяются у обоих владельцев.
+        game._resolve_death_token(defender, choice, attacker)
+        game._resolve_death_token(attacker, choice, defender)
+
+    game.request_decision(defender, "Мескалито, книжный червь",
+                          "Обменять жетон дохлого колдуна и применить эффекты обоих?",
+                          options, choose)
 
 
 @defense("leg_legdef")

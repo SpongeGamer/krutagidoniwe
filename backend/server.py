@@ -205,6 +205,12 @@ class Room:
         if not game:
             return False
         if game.pending_event:
+            # Боты закрывают окно только за себя; людей ждём.
+            for bot_player in game.players:
+                if self.is_bot(bot_player.id) and bot_player.is_alive():
+                    game.event_viewers.add(bot_player.id)
+            if [p for p in game._event_waiting_for() if not self.is_bot(p.id)]:
+                return False
             game.resolve_event()
             return True
         if game.pending_decision:
@@ -266,13 +272,19 @@ class Room:
             safety += 1
             game = self.game
             if game.pending_event:
-                # Беспредел человека всегда ждёт клика; бот может продолжить свой.
-                if not self.is_bot(game.active_player.id):
+                # Боты «читают» мгновенно — закрываем окно за каждого бота,
+                # чтобы партия не стояла из-за них. Люди жмут сами.
+                for bot_player in game.players:
+                    if self.is_bot(bot_player.id) and bot_player.is_alive():
+                        game.event_viewers.add(bot_player.id)
+                humans_left = [p for p in game._event_waiting_for()
+                               if not self.is_bot(p.id)]
+                if humans_left:
+                    # Ждём живых игроков: окно висит, пока все не прочитают.
+                    await self.broadcast()
                     break
-                # Сначала ПОКАЗЫВАЕМ карту всем и держим паузу, чтобы люди
-                # успели прочитать, и только потом применяем эффект.
                 await self.broadcast()
-                await asyncio.sleep(6.0)
+                await asyncio.sleep(1.0)
                 game.resolve_event()
                 await self.broadcast()
                 await asyncio.sleep(1.1)
@@ -669,7 +681,8 @@ async def ws_endpoint(websocket: WebSocket, room_id: str):
 
             result = {"error": "неизвестное действие"}
             if action == "resolve_event":
-                result = room.game.resolve_event()
+                # Передаём игрока: каждый закрывает окно события сам.
+                result = room.game.resolve_event(gp)
             elif action == "resolve_decision":
                 result = room.game.resolve_decision(gp, msg.get("option_id", ""))
             elif action == "play_card":

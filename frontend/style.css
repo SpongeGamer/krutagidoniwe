@@ -940,3 +940,60 @@ input { user-select:text; -webkit-user-select:text; }
 #gm-modal select,#gm-modal input{width:auto;min-width:96px;margin:0;padding:8px;border-color:#7ce0a055;background:#12251f;color:#e7fff1}
 .gm-hint{margin:6px 0 0;color:#9cc2ae;font-size:11px}
 .gm-toast{position:fixed;z-index:600;left:50%;bottom:22px;transform:translateX(-50%);padding:10px 18px;border:1px solid #7ce0a0;border-radius:10px;color:#0f2a1d;font-size:13px;font-weight:800;background:#8ff0b4;box-shadow:0 10px 26px #0009}
+
+/* ===================================================================== *
+ *  ЕДИНАЯ ШКАЛА СЛОЁВ
+ *  Раньше все модалки висели на z-index:100 и перекрывали друг друга в
+ *  произвольном порядке: лупа открывалась ПОД окном решения. Теперь
+ *  порядок задан явно и в одном месте.
+ * ===================================================================== */
+.modal            { z-index:1000 }   /* обычные окна */
+#decision-modal   { z-index:1100 }   /* выбор игрока — важнее обычных */
+#event-modal      { z-index:1200 }   /* Беспредел */
+#card-modal       { z-index:1600 }   /* лупа — ВСЕГДА поверх всего */
+#gm-modal,
+#gm-auth-modal    { z-index:1700 }   /* панель ведущего */
+.flying-card      { z-index:900 }    /* анимация полёта — под окнами */
+.turn-overlay     { z-index:880 }
+.besp-burst       { z-index:1150 }
+.burn-layer       { z-index:1160 }
+.gm-toast         { z-index:1800 }
+
+/* --- #2: ящики барахолки и легенд закрываются нормально --- */
+/* Пока ящик открыт кликом, hover его не держит: иначе он «залипал». */
+.market-drawer.pinned .drawer-content{opacity:1;pointer-events:auto;transform:none}
+.market-drawer.pinned .drawer-tab{border-color:#ffe89b;box-shadow:0 0 12px #ffce4c66}
+.drawer-close{position:absolute;z-index:6;right:8px;top:8px;display:grid;place-items:center;
+  width:30px;height:30px;padding:0;border:1px solid #ffd07a;border-radius:50%;
+  color:#2b1730;font-size:22px;font-weight:900;line-height:1;background:#ffd77e;
+  box-shadow:0 2px 8px #0009}
+.drawer-close:hover{background:#fff0b8}
+/* Подложка: клик мимо ящика закрывает его. */
+.drawer-backdrop{position:fixed;z-index:105;inset:0;background:#05030880}
+
+/* --- #11: кто над чем думает --- */
+.waiting-banner{position:fixed;z-index:1250;left:50%;bottom:26px;transform:translateX(-50%);
+  display:flex;align-items:center;gap:11px;max-width:min(560px,92vw);
+  padding:13px 22px;border:1px solid #ffd66d;border-radius:14px;
+  color:#fff2c8;background:#2a1636f2;box-shadow:0 12px 34px #000a}
+.waiting-banner b{color:#ffd35a}
+.waiting-banner .spin{width:17px;height:17px;border:3px solid #ffd35a55;
+  border-top-color:#ffd35a;border-radius:50%;animation:waitSpin .8s linear infinite;flex:0 0 auto}
+@keyframes waitSpin{to{transform:rotate(360deg)}}
+
+/* --- #12: кого ещё ждём на Беспределе --- */
+.event-waiting{margin-top:12px;padding:9px 12px;border:1px dashed #ffd06e88;
+  border-radius:10px;color:#ffe0a4;font-size:13px;text-align:center}
+.event-waiting b{color:#ffd35a}
+
+/* --- #14: лог событий читаемый и поверх стола --- */
+.event-feed{z-index:1050!important;width:min(420px,90vw);bottom:14px;left:14px}
+.event-feed #log-panel{height:min(46vh,420px);font-size:14px;line-height:1.45}
+.event-feed #log-panel div{padding:7px 2px}
+/* Свежие строки заметнее — глаз цепляется за то, что произошло только что. */
+.event-feed #log-panel div:last-child{color:#ffe9b0;font-weight:700}
+.log-toggle{position:relative}
+.log-badge{position:absolute;right:-5px;top:-6px;min-width:19px;height:19px;padding:0 5px;
+  border-radius:99px;color:#2a1520;font-size:11px;font-weight:900;line-height:19px;
+  background:#ffd35a;box-shadow:0 2px 6px #0008}
+@media(max-width:850px){.event-feed{left:8px;right:8px;width:auto}}

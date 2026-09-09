@@ -239,6 +239,13 @@ def apply(game, command: str, params: dict, gm_name: str = "Ведущий") -> 
         game.pending_event = None
         game.pending_attack = None
         game.event_queue.clear()
+        # Очередь отложенных решений тоже чистим, иначе после «разморозки»
+        # тут же всплывёт следующий зависший вопрос.
+        if hasattr(game, "_decision_stack"):
+            game._decision_stack.clear()
+        game._decision_callback = None
+        if hasattr(game, "event_viewers"):
+            game.event_viewers.clear()
         return _done(game, f"{gm_name}: зависшие окна выбора сброшены")
 
     if command == "finish_game":

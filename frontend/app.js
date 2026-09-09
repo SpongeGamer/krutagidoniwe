@@ -213,7 +213,7 @@ function sendRoomSettings(){ws.send(JSON.stringify({action:'configure_room',zhdk
     };
   });
   $('tokens-modal').classList.remove('hidden');
-};$('target-cancel').onclick=closeTargetModal;$('attack-cancel').onclick=()=>$('attack-modal').classList.add('hidden');$('attack-later').onclick=()=>{sendPlay(pendingAttackChoice,{defer_attack:true});$('attack-modal').classList.add('hidden')};$('attack-now').onclick=()=>{const card=pendingAttackChoice;$('attack-modal').classList.add('hidden');playAttackNow(card)};$('wild-cancel').onclick=()=>$('wild-modal').classList.add('hidden');$('wild-power').onclick=()=>{sendPlay({id:'spec_wild'}, {choice:'power'});$('wild-modal').classList.add('hidden')};$('wild-steal').onclick=()=>{wildTargetMode=true;$('wild-modal').classList.add('hidden');openTargetModal({id:'spec_wild',name:'Шальная магия'})};$('log-toggle').onclick=()=>document.querySelector('.event-feed').classList.add('open');$('log-close').onclick=()=>document.querySelector('.event-feed').classList.remove('open');document.querySelectorAll('.drawer-tab').forEach(tab=>tab.onclick=()=>{playSound('drawer');tab.closest('.market-drawer').classList.toggle('open')});document.addEventListener('contextmenu',event=>{const card=event.target.closest?.('.card');if(card?._cardData){event.preventDefault();showCard(card._cardData)}else event.preventDefault()},true);document.addEventListener('dragstart',event=>event.preventDefault(),true);
+};$('target-cancel').onclick=closeTargetModal;$('attack-cancel').onclick=()=>$('attack-modal').classList.add('hidden');$('attack-later').onclick=()=>{sendPlay(pendingAttackChoice,{defer_attack:true});$('attack-modal').classList.add('hidden')};$('attack-now').onclick=()=>{const card=pendingAttackChoice;$('attack-modal').classList.add('hidden');playAttackNow(card)};$('wild-cancel').onclick=()=>$('wild-modal').classList.add('hidden');$('wild-power').onclick=()=>{sendPlay({id:'spec_wild'}, {choice:'power'});$('wild-modal').classList.add('hidden')};$('wild-steal').onclick=()=>{wildTargetMode=true;$('wild-modal').classList.add('hidden');openTargetModal({id:'spec_wild',name:'Шальная магия'})};$('log-toggle').onclick=()=>{const f=document.querySelector('.event-feed');f.classList.toggle('open');logUnread=0;renderLogBadge()};$('log-close').onclick=()=>document.querySelector('.event-feed').classList.remove('open');document.addEventListener('contextmenu',event=>{const card=event.target.closest?.('.card');if(card?._cardData){event.preventDefault();showCard(card._cardData)}else event.preventDefault()},true);document.addEventListener('dragstart',event=>event.preventDefault(),true);
 function elementFor(selector){return document.querySelector(selector)}
 function lastElementFor(selector){const all=document.querySelectorAll(selector);return all.length?all[all.length-1]:null}
 function createBotHandSource(playerId,card){
@@ -773,7 +773,7 @@ function playerEl(p,isMe,isTurn,seat){
   if(zh&&p.death_tokens)zh.onclick=(event)=>{event.stopPropagation();showTokens(p)};
   return el;
 }
-function render(state){const me=state.players.find(p=>p.id===myId),active=state.players.find(p=>p.id===state.turn_player_id),myTurn=state.turn_player_id===myId;/* СЧЁТЧИКИ КОЛОДЫ/СБРОСА — В САМОМ НАЧАЛЕ. Никакая ошибка ниже не должна их обнулять. */setPileCounts(me);try{if(lastTurnPlayer&&lastTurnPlayer!==state.turn_player_id)playSound('turn');lastTurnPlayer=state.turn_player_id;renderVisualEvent(state.visual_event);renderDestroyReel(state.destroy_reel);renderEvent(state.pending_event);renderDecision(state.pending_decision);$('turn-banner').textContent=active?(myTurn?'Твой ход — наводи Крутагидон':`Ходит ${active.name}`):'Подготовка';$('log-panel').innerHTML=state.logs.map(l=>`<div>${escapeHtml(l)}</div>`).join('');$('log-panel').scrollTop=$('log-panel').scrollHeight;const seatedPlayers=[...(me?[me]:[]),...state.players.filter(p=>p.id!==myId)];const seatLayouts={1:[0],2:[0,1],3:[0,2,3],4:[0,4,1,5],5:[0,4,2,3,5]};const seats=seatLayouts[seatedPlayers.length]||seatLayouts[5];$('opponents').replaceChildren(...seatedPlayers.map((p,index)=>playerEl(p,p.id===myId,p.id===state.turn_player_id,seats[index])));$('played-cards').replaceChildren(...(active?.played_this_turn||[]).map(c=>cardEl(c,null)));$('main-deck-count').textContent=state.main_deck_count;$('legend-deck-count').textContent=state.legend_deck_count;$('vyal-count').textContent=state.vyal_remaining;$('zhdk-count').textContent=state.undead_stack_count;$('chips-bank-count').textContent=state.chips_bank;$('market').replaceChildren(...state.market.map(c=>cardEl(c,()=>myTurn&&buyCard(c.id))));$('legend-market').replaceChildren(...state.legend_market.map(c=>cardEl(c,()=>myTurn&&buyCard(c.id))));$('buy-wild-btn').disabled=!myTurn;const famBtn=$('buy-familiar-btn');const famLeft=(me?.familiars||[]).filter(f=>!(me?.bought_familiars||[]).includes(f.id));famBtn.disabled=!myTurn||!me||famLeft.length===0;
+function render(state){const me=state.players.find(p=>p.id===myId),active=state.players.find(p=>p.id===state.turn_player_id),myTurn=state.turn_player_id===myId;/* СЧЁТЧИКИ КОЛОДЫ/СБРОСА — В САМОМ НАЧАЛЕ. Никакая ошибка ниже не должна их обнулять. */setPileCounts(me);try{if(lastTurnPlayer&&lastTurnPlayer!==state.turn_player_id)playSound('turn');lastTurnPlayer=state.turn_player_id;renderVisualEvent(state.visual_event);renderDestroyReel(state.destroy_reel);renderEvent(state.pending_event);renderDecision(state.pending_decision);renderWaitingBanner(state);trackLog(state);$('turn-banner').textContent=active?(myTurn?'Твой ход — наводи Крутагидон':`Ходит ${active.name}`):'Подготовка';$('log-panel').innerHTML=state.logs.map(l=>`<div>${escapeHtml(l)}</div>`).join('');$('log-panel').scrollTop=$('log-panel').scrollHeight;const seatedPlayers=[...(me?[me]:[]),...state.players.filter(p=>p.id!==myId)];const seatLayouts={1:[0],2:[0,1],3:[0,2,3],4:[0,4,1,5],5:[0,4,2,3,5]};const seats=seatLayouts[seatedPlayers.length]||seatLayouts[5];$('opponents').replaceChildren(...seatedPlayers.map((p,index)=>playerEl(p,p.id===myId,p.id===state.turn_player_id,seats[index])));$('played-cards').replaceChildren(...(active?.played_this_turn||[]).map(c=>cardEl(c,null)));$('main-deck-count').textContent=state.main_deck_count;$('legend-deck-count').textContent=state.legend_deck_count;$('vyal-count').textContent=state.vyal_remaining;$('zhdk-count').textContent=state.undead_stack_count;$('chips-bank-count').textContent=state.chips_bank;$('market').replaceChildren(...state.market.map(c=>cardEl(c,()=>myTurn&&buyCard(c.id))));$('legend-market').replaceChildren(...state.legend_market.map(c=>cardEl(c,()=>myTurn&&buyCard(c.id))));$('buy-wild-btn').disabled=!myTurn;const famBtn=$('buy-familiar-btn');const famLeft=(me?.familiars||[]).filter(f=>!(me?.bought_familiars||[]).includes(f.id));famBtn.disabled=!myTurn||!me||famLeft.length===0;
 /* Фамильяр куплен — карточка уходит совсем, Шальная магия занимает её место. */
 famBtn.classList.toggle('hidden',famLeft.length===0);
 if(famLeft.length){famBtn.innerHTML='<img class="buy-fam-thumb" alt="">';famBtn.title=famLeft.length>1?`Купить фамильяра (${famLeft.length} на выбор) · 6`:`Купить фамильяра: ${famLeft[0].name} · 6`;attachCardImage(famBtn.querySelector('img'),famLeft[0].id);bindPreview(famBtn,()=>famLeft[0]);if(famLeft.length>1)famBtn.innerHTML+=`<b class="fam-left">${famLeft.length}</b>`}else{famBtn.innerHTML=''};$('hand').replaceChildren(...(me?.hand||[]).map(c=>cardEl(c,()=>myTurn&&playCard(c))));$('permanents').replaceChildren(...(me?.zone_in_play||[]).map(c=>cardEl(c,c.activation?()=>activatePermanent(c):null)));$('attack-actions').replaceChildren(...(me?.available_attacks||[]).map(c=>deferredAttackButton(c,myTurn)));$('self-panel').classList.toggle('self-loshara',Boolean(me?.is_loshara));$('self-stats').innerHTML=me?`<div class="self-name">${escapeHtml(me.name)}${me.is_loshara?' · ЛОШАРА':''}${myTurn?' · ТВОЙ ХОД':''}</div><div class="self-meta"><span class="stat-chip health">♥ ${me.life}/${me.max_life} HP</span><span class="stat-chip power">⚡ ${me.power_available} мощи</span></div>`:'';if(me?.discard_top){$('self-discard-card').src=`assets/cards/${encodeURIComponent(me.discard_top.id)}.webp`}else{$('self-discard-card').src='assets/cards/card_closed.webp'}$('prize-supply').classList.toggle('hidden',state.players.some(p=>p.controls_prize));renderPause(state);$('end-turn-btn').disabled=!myTurn||Boolean(state.pause?.paused);if(state.game_over&&!announcedGameOver){announcedGameOver=true;showGameOver(state)}}catch(err){showRenderError(err)}}
@@ -797,6 +797,25 @@ function renderEvent(event){
   if(who)who.classList.add('hidden');
   $('event-continue').textContent=isToken?'Понятно →':'Показать эффект →';
   $('event-continue').disabled=false;
+  // Каждый игрок закрывает Беспредел сам: пока не нажали все, окно висит
+  // и показывает, кого именно ждём.
+  let waitBox=$('event-waiting');
+  const names=event.waiting_names||[];
+  if(!waitBox){
+    waitBox=document.createElement('div');
+    waitBox.id='event-waiting';waitBox.className='event-waiting';
+    $('event-continue').parentNode.insertBefore(waitBox,$('event-continue').nextSibling);
+  }
+  if(event.seen){
+    // Я уже прочитал — жду остальных, кнопка гаснет.
+    $('event-continue').disabled=true;
+    $('event-continue').textContent='Ждём остальных…';
+    waitBox.classList.remove('hidden');
+    waitBox.innerHTML=names.length?`Ещё не закрыли: <b>${names.map(escapeHtml).join(', ')}</b>`:'Продолжаем…';
+  }else if(names.length>1){
+    waitBox.classList.remove('hidden');
+    waitBox.innerHTML=`Закрывает каждый сам · осталось: <b>${names.length}</b>`;
+  }else{waitBox.classList.add('hidden')}
   // Беспредел и Мегабеспредел объявляем громко: вспышка, тряска, надпись.
   const kind=(event.type||'');
   const isBesp=!isToken&&/еспредел/i.test(kind);
@@ -831,7 +850,10 @@ function playCard(card){if(card.id==='spec_wild'){$('wild-modal').classList.remo
 function playAttackNow(card){if(cardNeedsTarget(card))openTargetModal(card);else sendPlay(card,{})}
 function deferredAttackButton(card,myTurn){const b=document.createElement('button');b.className='deferred-attack';b.disabled=!myTurn;b.innerHTML=`⚔ Атаковать: <b>${escapeHtml(card.name)}</b>`;b.onclick=()=>activateDeferredAttack(card);return b}
 function activateDeferredAttack(card){deferredAttackMode=true;if(cardNeedsTarget(card))openTargetModal(card);else sendAttackActivation(card,{})}
-function openTargetModal(card){pendingTargetCard=card;$('target-card-name').textContent=card.name;const selfAllowed=card.id==='start_syrpal'||card.id==='start_hrenal';const targets=lastState.players.filter(p=>selfAllowed||p.id!==myId);$('target-list').replaceChildren(...targets.map(p=>{const b=document.createElement('button');b.className='target-button';b.innerHTML=`<b>${escapeHtml(p.name)}${p.id===myId?' · ты':''}</b><small>♥ ${p.life}/${p.max_life} · ☠ ЖДК ${p.death_tokens}</small>`;b.onclick=()=>{if(permanentActivationCard){sendPermanentActivation(permanentActivationCard,{target_id:p.id});permanentActivationCard=null}else if(deferredAttackMode){sendAttackActivation(card,{target_id:p.id});deferredAttackMode=false}else{sendPlay(card,wildTargetMode?{choice:'steal',target_id:p.id}:{target_id:p.id})}wildTargetMode=false;closeTargetModal()};return b}));$('target-modal').classList.remove('hidden')}
+function openTargetModal(card){pendingTargetCard=card;$('target-card-name').textContent=card.name;/* Себя в цели не показываем НИКОГДА: сырная палочка и палочка-хреналочка
+   пускали игрока бить самого себя, и по ним постоянно промахивались.
+   Мёртвых тоже прячем — бить труп бессмысленно. */
+const targets=lastState.players.filter(p=>p.id!==myId&&(p.life===undefined||p.life>0));$('target-list').replaceChildren(...targets.map(p=>{const b=document.createElement('button');b.className='target-button';b.innerHTML=`<b>${escapeHtml(p.name)}</b><small>♥ ${p.life}/${p.max_life} · ☠ ЖДК ${p.death_tokens}</small>`;b.onclick=()=>{if(permanentActivationCard){sendPermanentActivation(permanentActivationCard,{target_id:p.id});permanentActivationCard=null}else if(deferredAttackMode){sendAttackActivation(card,{target_id:p.id});deferredAttackMode=false}else{sendPlay(card,wildTargetMode?{choice:'steal',target_id:p.id}:{target_id:p.id})}wildTargetMode=false;closeTargetModal()};return b}));$('target-modal').classList.remove('hidden')}
 function closeTargetModal(){$('target-modal').classList.add('hidden');pendingTargetCard=null}
 function sendPlay(card,params){playSound('card');ws.send(JSON.stringify({action:'play_card',card_id:card.id,params}))}
 function sendAttackActivation(card,params){playSound('card');ws.send(JSON.stringify({action:'activate_attack',card_id:card.id,params}))}
@@ -995,3 +1017,96 @@ document.addEventListener('keydown',(e)=>{
     };
   });
 })();
+
+/* ===================================================================== *
+ *  ЯЩИКИ БАРАХОЛКИ И ЛЕГЕНД (#2)
+ *
+ *  Было: ящик открывался по hover и по клику через toggle('open').
+ *  Если открыть кликом, а потом увести мышь — состояние 'open' оставалось,
+ *  а повторный клик часто не срабатывал (курсор попадал на карту внутри).
+ *  Стало: клик «прикалывает» ящик (pinned) и показывает крестик + подложку.
+ *  Закрыть можно тремя способами: крестик, клик мимо, Esc.
+ * ===================================================================== */
+let drawerBackdrop=null;
+
+function closeDrawers(){
+  document.querySelectorAll('.market-drawer.pinned').forEach(d=>d.classList.remove('pinned','open'));
+  if(drawerBackdrop){drawerBackdrop.remove();drawerBackdrop=null}
+}
+
+function pinDrawer(drawer){
+  const already=drawer.classList.contains('pinned');
+  closeDrawers();
+  if(already)return;                    // повторный клик — просто закрыть
+  drawer.classList.add('pinned');
+  drawerBackdrop=document.createElement('div');
+  drawerBackdrop.className='drawer-backdrop';
+  drawerBackdrop.onclick=closeDrawers;
+  document.body.append(drawerBackdrop);
+}
+
+document.querySelectorAll('.market-drawer').forEach(drawer=>{
+  const tab=drawer.querySelector('.drawer-tab');
+  if(tab)tab.onclick=(e)=>{e.stopPropagation();playSound('drawer');pinDrawer(drawer)};
+  const content=drawer.querySelector('.drawer-content');
+  if(content&&!content.querySelector('.drawer-close')){
+    const close=document.createElement('button');
+    close.className='drawer-close';close.type='button';
+    close.textContent='×';close.title='Закрыть';
+    close.onclick=(e)=>{e.stopPropagation();playSound('click');closeDrawers()};
+    content.prepend(close);
+  }
+});
+
+/* Esc закрывает всё, что открыто «поверх» — по одному слою за нажатие. */
+document.addEventListener('keydown',(e)=>{
+  if(e.key!=='Escape')return;
+  if(!$('card-modal').classList.contains('hidden')){$('card-modal').classList.add('hidden');return}
+  if(document.querySelector('.market-drawer.pinned')){closeDrawers();return}
+  const feed=document.querySelector('.event-feed');
+  if(feed?.classList.contains('open'))feed.classList.remove('open');
+});
+
+/* ===================================================================== *
+ *  ПЛАШКА ОЖИДАНИЯ (#11)
+ *  Иконка щита мелькала слишком быстро — игроки не понимали, почему
+ *  партия «замерла». Плашка висит всё время, пока соперник выбирает.
+ * ===================================================================== */
+function renderWaitingBanner(state){
+  let bar=$('waiting-banner');
+  const decision=state.pending_decision;
+  const waiting=decision&&decision.waiting_for;
+  if(!waiting){if(bar)bar.remove();return}
+  if(!bar){
+    bar=document.createElement('div');
+    bar.id='waiting-banner';bar.className='waiting-banner';
+    document.body.append(bar);
+  }
+  const what=decision.waiting_title||'';
+  const isDefense=/атака|беспредел|защит/i.test(what);
+  bar.innerHTML=`<span class="spin"></span><span>${isDefense?'🛡 ':''}<b>${escapeHtml(decision.waiting_for)}</b> ${isDefense?'решает, чем защищаться':'принимает решение'}${what?` — <i>${escapeHtml(what)}</i>`:''}</span>`;
+}
+
+/* ===================================================================== *
+ *  ЛОГ СОБЫТИЙ (#14)
+ *  Лог сделан крупнее и поверх стола, плюс счётчик непрочитанного,
+ *  чтобы не пропускать важное, пока панель закрыта.
+ * ===================================================================== */
+let logUnread=0, logSeenCount=0;
+
+function renderLogBadge(){
+  const btn=$('log-toggle');
+  if(!btn)return;
+  let badge=btn.querySelector('.log-badge');
+  if(!logUnread){badge?.remove();return}
+  if(!badge){badge=document.createElement('span');badge.className='log-badge';btn.append(badge)}
+  badge.textContent=logUnread>99?'99+':String(logUnread);
+}
+
+function trackLog(state){
+  const total=(state.logs||[]).length;
+  const feed=document.querySelector('.event-feed');
+  if(feed?.classList.contains('open')){logSeenCount=total;logUnread=0}
+  else{logUnread=Math.max(0,total-logSeenCount)}
+  renderLogBadge();
+}

@@ -259,15 +259,50 @@ def _leg_epicvyal(game, player, card, **kw):
 
 @effect("leg_minigun")
 def _leg_minigun(game, player, card, **kw):
-    """Три отдельные атаки по 7 урона."""
+    """Четыре отдельные атаки по 7 урона по ВЫБРАННЫМ колдунам.
+
+    Раньше карта висела в NO_TARGET_CARDS: цель у игрока не спрашивали,
+    а без неё эффект молча заканчивался — атака не проходила вообще.
+    Теперь цель спрашивается для каждого выстрела по очереди.
+    """
     if not kw.get("use_attack", True):
         return
+
+    SHOTS = 4
+
+    def shot(number: int, preset: list):
+        enemies = [e for e in game.enemies_of(player) if e.is_alive()]
+        if not enemies:
+            return
+        # Цели могли прийти сразу (бот или повторный клик) — используем их.
+        if preset:
+            target = preset.pop(0)
+            game.attack_target(player, card, target.id, 7)
+            if number + 1 < SHOTS:
+                shot(number + 1, preset)
+            return
+        if len(enemies) == 1:
+            # Выбирать не из чего — не мучаем игрока лишним окном.
+            game.attack_target(player, card, enemies[0].id, 7)
+            if number + 1 < SHOTS:
+                shot(number + 1, preset)
+            return
+        options = [{"id": e.id, "label": e.name,
+                    "detail": f"♥ {e.life}/{e.max_life}"} for e in enemies]
+
+        def choose(target_id: str):
+            game.attack_target(player, card, target_id, 7)
+            if number + 1 < SHOTS:
+                shot(number + 1, preset)
+
+        game.request_decision(
+            player, "Палочка-миниганочка",
+            f"Выстрел {number + 1} из {SHOTS}: кому 7 урона?",
+            options, choose)
+
     ids = kw.get("target_ids") or ([kw.get("target_id")] if kw.get("target_id") else [])
-    targets = [game.get_player(i) for i in ids if game.get_player(i)]
-    if not targets:
-        return
-    pairs = [(t, 7) for t in targets[:3]]
-    game.declare_variable_attack(player, card, pairs)
+    preset = [p for p in (game.get_player(i) for i in ids) if p and p.id != player.id]
+    shot(0, preset)
 
 
 @effect("leg_loshash")
