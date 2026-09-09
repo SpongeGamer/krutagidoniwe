@@ -157,6 +157,8 @@ class GameState:
         # затирал предыдущий вопрос: старый выбор исчезал, а вместо него
         # срабатывал чужой эффект. Теперь всё, что не влезло, ждёт очереди.
         self._decision_stack: list[tuple] = []
+        # Разовый флаг: следующая смерть не выдаёт жетон автоматически.
+        self._suppress_death_token: bool = False
         self.last_damage_target_id: Optional[str] = None
 
         self._setup()
@@ -201,6 +203,18 @@ class GameState:
         self.undead_token_stack = undead_ids[: 4 * len(self.players)] if undead_ids else []
 
         self.log("Партия подготовлена. Первый ход у " + self.players[0].name)
+
+    def zhdk_count(self, player: Player) -> int:
+        """Сколько жетонов дохлого колдуна «под контролем» игрока.
+
+        Дохляки (sdk_1..sdk_5) — карты барахолки, которые по своему тексту
+        САМИ СЧИТАЮТСЯ жетонами дохлого колдуна. Поэтому любые эффекты вида
+        «за каждый жетон ЖДК под твоим контролем» обязаны учитывать и их.
+        Раньше считался только список death_tokens, и Некрошест с Гнилюсей
+        недосчитывались всех лежащих на столе Дохляков.
+        """
+        dohlyaki = sum(1 for cid in player.zone_in_play if cid.startswith("sdk_"))
+        return len(player.death_tokens) + dohlyaki
 
     def death_token_pool(self) -> list[str]:
         """Жетоны, которые можно получить за смерть.
@@ -559,7 +573,7 @@ class GameState:
         if "place_circus" in p.zone_in_play and p.is_loshara:
             static_power += 2
         if "leg_sexlight" in p.zone_in_play:
-            static_power += len(p.death_tokens)
+            static_power += self.zhdk_count(p)
         if "leg_viagrus" in p.zone_in_play and self.vyal_remaining > 0:
             self.give_weak_sticks(p, 1, "hand")
             self.log(f"{p.name}: Виагрус выдаёт вялую палочку")
@@ -1021,21 +1035,12 @@ class GameState:
             return {"error": "Сейчас не ваш ход"}
         if self.pending_event or self.pending_attack or self.pending_decision:
             return {"error": "Сначала завершите текущий выбор или атаку"}
-        # Дохляки (sdk_*) — постоянки, считающиеся жетонами ЖДК.
-        # По правилам стола игрок получает чипсину за КАЖДЫЙ свой жетон
-        # в конце каждого хода, пока Дохляк лежит на столе. Раньше чипсины
-        # выдавались только один раз при розыгрыше карты.
-        dohlyaki = [cid for cid in player.zone_in_play if cid.startswith("sdk_")]
-        if dohlyaki:
-            # Жетоны + сами Дохляки на столе: каждый считается жетоном ЖДК.
-            tokens = len([t for t in player.death_tokens if not t.startswith("sdk_")])
-            per_card = tokens + len(dohlyaki)
-            gain = per_card * len(dohlyaki)
-            if gain:
-                player.chipsines += gain
-                names = ", ".join(self.cards[c].name for c in dohlyaki)
-                self.log(f"{player.name}: {names} — +{gain} чипсин(ы) "
-                         f"(всего {player.chipsines})")
+        # ВАЖНО: Дохляки НЕ приносят чипсины в конце хода.
+        # Текст карты: «СЫГРАВ ЭТУ КАРТУ, получи 1 чипсину за каждый свой
+        # жетон дохлого колдуна» — выплата разовая, в момент розыгрыша.
+        # Постоянка означает лишь то, что карта САМА считается жетоном ЖДК
+        # и увеличивает выплату следующих Дохляков. Ежеходное начисление,
+        # добавленное здесь ранее, давало боту +15 чипсин за ход. Удалено.
 
         # Владелец Главного приза получает чипсину в конце своего хода.
         if player.controls_prize:
@@ -1495,9 +1500,45 @@ class GameState:
         self.prize_holder = killer.id
         self.log(f"{killer.name} отбирает главный приз Крутагидона у {victim.name}")
 
+    def _show_token_event(self, player: Player, token_id: str):
+        """Крупная плашка «игрок получил жетон».
+
+        Вынесено отдельно, чтобы карты вроде «Мортал Комбо» могли показать
+        плашку ПОСЛЕ выбора убийцы, а не до него.
+        """
+        tok = self.zhdk.get(token_id, {})
+        self._event_sequence = getattr(self, "_event_sequence", 0) + 1
+        token_event = {
+            "id": token_id,
+            "name": tok.get("name", token_id),
+            "seq": self._event_sequence,
+            "type": "Жетон дохлого колдуна",
+            "text": tok.get("effect_text", ""),
+            "owner_id": player.id,
+            "owner": player.name,
+        }
+        if self.pending_event:
+            # Окно уже занято (умер кто-то ещё) — встаём в очередь,
+            # иначе второй жетон никто не увидит.
+            self.event_queue.append(token_event)
+        else:
+            self.pending_event = token_event
+            self._pending_event_card = None
+            self.event_viewers.clear()
+
     def _handle_death(self, player: Player, killer: Optional[Player]):
         player.just_died = True
         token_id = None
+        # «Мортал Комбо» и подобные карты сами решают, какой жетон получит
+        # жертва. Без этого флага движок успевал вытянуть СЛУЧАЙНЫЙ жетон,
+        # показать плашку и применить его эффект — а карта потом молча
+        # подменяла жетон. Игрок видел чужой результат до своего выбора.
+        if getattr(self, "_suppress_death_token", False):
+            self._suppress_death_token = False
+            self.log(f"{player.name} подох — убийца выбирает жетон")
+            player.life = self._revive_life(player)
+            self._pass_prize(player, killer)
+            return
         # «Браталити»: убитый в этот раз не получает жетон дохлого колдуна.
         if killer and getattr(killer, "brotality_active", False):
             killer.brotality_active = False
@@ -1512,24 +1553,7 @@ class GameState:
             tok_name = tok.get("name", token_id)
             tok_text = tok.get("effect_text", "")
             self.log(f"{player.name} получает жетон дохлого колдуна: «{tok_name}». {tok_text}")
-            # Показываем жетон крупно: игрок должен видеть, что именно ему выпало.
-            self._event_sequence = getattr(self, "_event_sequence", 0) + 1
-            token_event = {
-                "id": token_id,
-                "name": tok_name,
-                "seq": self._event_sequence,
-                "type": "Жетон дохлого колдуна",
-                "text": tok_text,
-                "owner_id": player.id,
-                "owner": player.name,
-            }
-            if self.pending_event:
-                # Окно уже занято (умер кто-то ещё) — встаём в очередь,
-                # иначе второй жетон никто не увидит.
-                self.event_queue.append(token_event)
-            else:
-                self.pending_event = token_event
-                self._pending_event_card = None
+            self._show_token_event(player, token_id)
         player.life = self._revive_life(player)
         if token_id:
             self._resolve_death_token(player, token_id, killer)

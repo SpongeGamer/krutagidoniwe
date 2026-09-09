@@ -103,7 +103,8 @@ def donate(game, player, card, **kw):
 
 @effect("treas_necrostrip")
 def necrostrip(game, player, card, **kw):
-    player.power_available += 2 * len(player.death_tokens)
+    # Дохляки на столе тоже считаются жетонами ЖДК.
+    player.power_available += 2 * game.zhdk_count(player)
 
 
 @effect("treas_vordal")

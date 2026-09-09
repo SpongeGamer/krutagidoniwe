@@ -211,13 +211,12 @@ def _vyal(game, player, card, **kw):
 def _dohlyak_effect(game, player, card, **kw):
     """Чипсины за каждый жетон ЖДК в момент розыгрыша.
 
-    Дальше карта ложится постоянкой и приносит чипсины в конце КАЖДОГО хода —
-    это считает end_turn(). Раньше выплата была разовой, и у игроков
-    Дохляки «работали один раз».
+    Выплата РАЗОВАЯ: «сыграв эту карту, получи 1 чипсину за каждый свой
+    жетон дохлого колдуна». Постоянка означает лишь то, что карта сама
+    считается жетоном ЖДК и увеличивает выплату следующих Дохляков.
     """
-    tokens = len([t for t in player.death_tokens if not t.startswith("sdk_")])
-    already = len([c for c in player.zone_in_play if c.startswith("sdk_")])
-    count = tokens + already + 1   # сама карта тоже считается жетоном
+    # +1 — сама разыгрываемая карта: на стол она попадёт уже после эффекта.
+    count = game.zhdk_count(player) + 1
     player.chipsines += count
     game.log(f"{player.name}: {card.name} — получает {count} чипсины (жетонов ЖДК: {count})")
 
@@ -314,7 +313,7 @@ def _conduct(game, player, card, **kw):
 @effect("fam_mescalito")
 def _mescalito(game, player, card, **kw):
     if not kw.get("attack_only", False):
-        game.draw_cards(player, 1); player.power_available += len(player.death_tokens)
+        game.draw_cards(player, 1); player.power_available += game.zhdk_count(player)
 
 @effect("treas_witchgift")
 def _witchgift(game, player, card, **kw):

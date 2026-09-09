@@ -153,8 +153,25 @@ def _def_hostages(game, defender, attacker, card):
 
 @defense("fam_suitors")
 def _def_suitors(game, defender, attacker, card):
-    """Возьми 1 карту."""
-    game.draw_cards(defender, 1)
+    """Раскрыть эту карту и сбросить ДРУГУЮ случайную карту с руки.
+
+    Особенность: сама карта НЕ сбрасывается — она только показывается
+    и остаётся на руке. Раньше движок сбрасывал её как обычную защиту,
+    да ещё и добирал карту, которой в тексте нет.
+    """
+    # Возвращаем карту на руку: её лишь раскрывают.
+    if card.id in defender.discard:
+        defender.discard.remove(card.id)
+        defender.hand.append(card.id)
+    others = [cid for cid in defender.hand if cid != card.id]
+    if not others:
+        game.log(f"{defender.name}: Никчемухажёры раскрыты, но сбрасывать нечего")
+        return
+    victim_card = game.rng.choice(others)
+    defender.hand.remove(victim_card)
+    defender.discard.append(victim_card)
+    game.log(f"{defender.name}: раскрывает «{card.name}» и сбрасывает случайную "
+             f"карту «{game.cards[victim_card].name}»")
 
 
 @defense("fam_mescalito")
@@ -201,7 +218,14 @@ def _def_mescalito(game, defender, attacker, card):
 
 @defense("leg_legdef")
 def _def_legdef(game, defender, attacker, card):
-    game.draw_cards(defender, 1)
+    """Возьми 2 карты и получи 2 чипсины.
+
+    Было: всего 1 карта и ноль чипсин — половина эффекта не работала.
+    """
+    game.draw_cards(defender, 2)
+    defender.chipsines += 2
+    game.log(f"{defender.name}: Легендохранитель — +2 карты и +2 чипсины "
+             f"(всего {defender.chipsines})")
 
 
 # ---------------------------------------------------------------------------
@@ -235,15 +259,25 @@ def _def_glistomage(game, defender, attacker, card):
 
 @effect("wiz_punks")
 def _wiz_punks(game, player, card, **kw):
-    pass  # только защита
+    """Возьми 1 карту.
+
+    Было `pass` («только защита») — верхняя строка карты игнорировалась.
+    У карты НЕТ бонуса мощи: в базе ошибочно стояло +2 мощи.
+    """
+    if not kw.get("attack_only", False):
+        game.draw_cards(player, 1)
 
 
 @defense("wiz_punks")
 def _def_punks(game, defender, attacker, card):
-    """Возьми 1 карту, а атакующий отхватывает 2 урона."""
+    """Возьми 1 карту, а атакующий отхватывает 3 урона.
+
+    В коде стояло 2 урона вместо 3 — расходилось с текстом карты.
+    """
     game.draw_cards(defender, 1)
-    if attacker and attacker.is_alive():
-        game.deal_damage(defender, attacker.id, 2, card.name)
+    if attacker and attacker.is_alive() and attacker.id != defender.id:
+        game.log(f"{defender.name}: Бесопанки бьют в ответ — 3 урона {attacker.name}")
+        game.deal_damage(defender, attacker.id, 3, card.name)
 
 
 @activation("wiz_marmemage")

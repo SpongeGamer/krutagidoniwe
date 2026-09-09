@@ -368,4 +368,4 @@ def mega_6(game, player, card, **kw):
 
 @effect("mega_7")
 def mega_7(game, player, card, **kw):
-    for target in game.players: target.chipsines += len(target.death_tokens)
+    for target in game.players: target.chipsines += game.zhdk_count(target)

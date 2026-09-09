@@ -32,7 +32,7 @@ def legdef(game, player, card, **kw):
 @effect("leg_necrorot")
 def necrorot(game, player, card, **kw):
     if kw.get("use_attack", True):
-        game.declare_attack(player, card, "all_enemies", 4 * len(player.death_tokens))
+        game.declare_attack(player, card, "all_enemies", 4 * game.zhdk_count(player))
 
 
 @effect("leg_avada")

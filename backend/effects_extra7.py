@@ -118,11 +118,9 @@ def _leg_mortal(game, player, card, **kw):
     def on_hit(victim, died):
         if not died:
             return
-        # Обычный жетон за смерть уже выдан движком — забираем его обратно,
-        # ведь по карте жертва получает жетон ИЗ ТРЁХ на выбор убийцы.
-        if victim.death_tokens:
-            game.undead_token_stack.append(victim.death_tokens.pop())
-
+        # Жетон за смерть НЕ выдавался автоматически (флаг ниже), поэтому
+        # забирать ничего не нужно: жертва получит ровно тот жетон,
+        # который выберет убийца.
         drawn = []
         for _ in range(3):
             if game.undead_token_stack:
@@ -135,8 +133,11 @@ def _leg_mortal(game, player, card, **kw):
             for tid in drawn:
                 if tid == token_id:
                     victim.death_tokens.append(tid)
-                    name = game.zhdk.get(tid, {}).get("name", tid)
+                    tok = game.zhdk.get(tid, {})
+                    name = tok.get("name", tid)
                     game.log(f"{player.name} выбирает жетон «{name}» для {victim.name}")
+                    # Плашка показывается ТОЛЬКО СЕЙЧАС — после выбора убийцы.
+                    game._show_token_event(victim, tid)
                     game._resolve_death_token(victim, tid, player)
                 else:
                     game.undead_token_stack.append(tid)   # остальные — обратно
@@ -159,7 +160,11 @@ def _leg_mortal(game, player, card, **kw):
             options, choose,
         )
 
+    # Просим движок не выдавать жетон автоматически: выбор за убийцей.
+    game._suppress_death_token = True
     game.attack_target(player, card, target.id, max(1, target.life), on_hit=on_hit)
+    # Атаку могли отбить — тогда смерти не было и флаг надо снять.
+    game._suppress_death_token = False
 
 
 @effect("leg_captain")
@@ -317,7 +322,7 @@ def _leg_sexlight(game, player, card, **kw):
     Начисляем СРАЗУ при выкладывании — игрок не должен ждать следующего
     хода, чтобы увидеть эффект. В start_turn мощь начислится снова.
     """
-    bonus = len(player.death_tokens)
+    bonus = game.zhdk_count(player)
     if bonus:
         player.power_available += bonus
         game.log(f"{player.name}: «{card.name}» +{bonus} мощи за жетоны "
