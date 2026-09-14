@@ -139,6 +139,10 @@ class GameState:
         self.final_scores: dict = {}
 
         self.pending_attack: Optional[dict] = None
+        # Очередь ещё не начатых атак. Миниган объявляет 4 выстрела подряд,
+        # а каждый ждёт своего окна защиты — без очереди выстрелы 2-4
+        # затирали первый, и одна карта защиты гасила сразу все четыре.
+        self.attack_queue: list[dict] = []
         # Карта Беспредела/Мегабеспредела показана всем до выполнения эффекта.
         self.pending_event: Optional[dict] = None
         self._pending_event_card: Optional[Card] = None
@@ -551,9 +555,13 @@ class GameState:
     def start_turn(self):
         for player in self.players:
             player.no_defense_turn = False
+        # СНАЧАЛА объявляем, чей ход, и только потом добираем витрины —
+        # иначе в журнале выходило «БЕСПРЕДЕЛ → ходит такой-то → МЕГАБЕСПРЕДЕЛ»,
+        # хотя ход обязан передаваться до того, как беспределы сыграют.
+        p = self.active_player
+        self.log(f"--- Ход игрока {p.name} ---")
         self._refilling_markets = True
         self._resume_market_refill()
-        p = self.active_player
         p.power_available = 0
         p.in_play_this_turn = []
         p.available_attacks = []
@@ -580,20 +588,9 @@ class GameState:
         if static_power:
             p.power_available += static_power
             self.log(f"{p.name}: постоянки дают +{static_power} мощи")
-        # «Дорогой жетон» (dk_12): в свой ход можно откупиться 5 чипсинами.
-        if "dk_12" in p.death_tokens and p.chipsines >= 5:
-            def buy_off(choice: str, _p=p):
-                if choice == "yes" and _p.chipsines >= 5 and "dk_12" in _p.death_tokens:
-                    _p.chipsines -= 5
-                    _p.death_tokens.remove("dk_12")
-                    self.log(f"{_p.name}: платит 5 чипсин и уничтожает «Дорогой жетон»")
-            self.request_decision(
-                p, "Дорогой жетон",
-                "Потратить 5 чипсин, чтобы избавиться от этого жетона?",
-                [{"id": "yes", "label": "Заплатить 5 чипсин"},
-                 {"id": "no", "label": "Оставить жетон"}],
-                buy_off,
-            )
+        # «Дорогой жетон» (dk_12) откупается кнопкой в списке ЖДК в любой
+        # момент своего хода — см. buy_off_token(). Окно в начале хода
+        # больше не показываем: игрок мог накопить чипсины позже.
         if p.property_id == "svo_7":
             owned = sum(1 for cid in self.controlled_card_ids(p)
                         if {"Сокровище", "Тварь"} & self.cards[cid].types_for_matching)
@@ -605,7 +602,6 @@ class GameState:
                         if {"Волшебник", "Заклинание"} & self.cards[cid].types_for_matching)
             if owned >= 2:
                 self._offer_enemy_top_card(p)
-        self.log(f"--- Ход игрока {p.name} ---")
 
     def _offer_enemy_top_card(self, player: Player):
         """Свойство «Контроль врага»: сыграть верхнюю карту колоды врага."""
@@ -898,6 +894,11 @@ class GameState:
         Шальная магия и Капитан Бартоломяу раньше применяли эффект «как есть»:
         карта с атакой просто давала мощь, потому что цель никто не спрашивал.
         """
+        # Украденная ПОСТОЯНКА должна лечь на стол, а не раствориться:
+        # раньше она нигде не оказывалась и просто пропадала из игры.
+        if card.postoyanka and card.id not in player.zone_in_play:
+            player.zone_in_play.append(card.id)
+            self.log(f"{player.name}: «{card.name}» ложится постоянкой на стол")
         if kwargs.get("target_id") or not card.has_attack or not self.card_needs_target(card):
             self.apply_card_effect(player, card, add_power=False, **kwargs)
             return
@@ -1053,6 +1054,11 @@ class GameState:
         borrowed = {cid: owner for cid, owner in player.borrowed_cards}
         player.borrowed_cards = []
         played_cards = [c for c in player.in_play_this_turn if c not in borrowed]
+        # Украденная постоянка тоже одолжена: снимаем её со стола вора,
+        # иначе чужая карта оставалась бы у него до конца партии.
+        for cid in list(borrowed):
+            if cid in player.zone_in_play:
+                player.zone_in_play.remove(cid)
         for cid, owner_id in borrowed.items():
             owner = self.get_player(owner_id)
             if owner:
@@ -1067,10 +1073,13 @@ class GameState:
             self.emit_visual_event("discard", player, played_cards, "table", "discard")
         player.power_available = 0
         if player.property_id == "svo_3":
+            # Бонус действует ТОЛЬКО на текущий добор: «за каждое полученное
+            # В ЭТОТ ХОД заклинание». Раньше он накапливался из хода в ход и
+            # превращался в имбу — к пятому ходу игрок тянул по 10 карт.
             gained_spells = sum(1 for cid in player.received_this_turn if "Заклинание" in self.cards[cid].types_for_matching)
+            player.hand_limit_bonus = gained_spells
             if gained_spells:
-                player.hand_limit_bonus += gained_spells
-                self.log(f"{player.name}: свойство «Заклинание и предел руки» — +{gained_spells} к пределу руки")
+                self.log(f"{player.name}: свойство «Заклинание и предел руки» — +{gained_spells} к пределу руки в этот раз")
         self.draw_cards(player, self.hand_limit(player))
 
         if self._check_end_condition():
@@ -1083,14 +1092,52 @@ class GameState:
         self.start_turn()
         return {"ok": True}
 
+    # Жетоны, которые можно уничтожить за чипсины прямо в свой ход.
+    # ТОЛЬКО те, у кого это написано в тексте: id -> цена.
+    TOKEN_BUYOFF = {"dk_12": 5}
+
+    def can_buy_off_token(self, player: Player, token_id: str) -> bool:
+        price = self.TOKEN_BUYOFF.get(token_id)
+        return bool(price and token_id in player.death_tokens
+                    and player.chipsines >= price)
+
+    def buy_off_token(self, player: Player, token_id: str) -> dict:
+        """Уничтожить жетон за чипсины (dk_12 «Дорогой жетон»)."""
+        price = self.TOKEN_BUYOFF.get(token_id)
+        if not price:
+            return {"error": "Этот жетон нельзя уничтожить за чипсины"}
+        if player.id != self.active_player.id:
+            return {"error": "Это можно сделать только в свой ход"}
+        if self.pending_event or self.pending_attack or self.pending_decision:
+            return {"error": "Сначала завершите текущий выбор"}
+        if token_id not in player.death_tokens:
+            return {"error": "У вас нет этого жетона"}
+        if player.chipsines < price:
+            return {"error": f"Нужно {price} чипсин, у вас {player.chipsines}"}
+        player.chipsines -= price
+        player.death_tokens.remove(token_id)
+        name = self.zhdk.get(token_id, {}).get("name", token_id)
+        self.log(f"{player.name}: платит {price} чипсин и уничтожает «{name}»")
+        return {"ok": True}
+
     def _check_end_condition(self) -> bool:
-        if len(self.legend_market) < LEGEND_MARKET_SIZE and not self.legend_deck:
-            return True
-        if len(self.market) < MARKET_SIZE and not self.main_deck:
-            return True
-        if not self.undead_token_stack:
-            return True
-        return False
+        """Игра кончается, только когда КАЖДЫЙ источник карт исчерпан.
+
+        Раньше хватало одного условия: барахолка опустела — конец, хотя на
+        столе ещё лежали покупаемые легенды. Теперь пустая барахолка сама по
+        себе игру не останавливает, пока есть что купить в легендах или
+        остались жетоны дохлых колдунов.
+        """
+        # Любого ОДНОГО условия достаточно:
+        #  * легенды кончились совсем — и стопка, и витрина;
+        #  * кончилась барахолка обычных карт;
+        #  * кончились жетоны дохлых колдунов.
+        # Витрина легенд отдельным приоритетом НЕ считается: пока на ней
+        # лежит хоть одна покупаемая легенда, по легендам игра не кончается.
+        legends_over = not self.legend_deck and not self.legend_market
+        market_over = not self.main_deck and not self.market
+        tokens_over = not self.undead_token_stack
+        return legends_over or market_over or tokens_over
 
     # ------------------------------------------------------------------ #
     # Урон / атака / защита
@@ -1160,6 +1207,10 @@ class GameState:
                       no_redirect: bool = False):
         if not targets:
             return
+        # Беспределы и Мегабеспределы бьют «каждого колдуна», включая того,
+        # кто их вскрыл. Фильтр самоурона тут применять нельзя: из-за него
+        # mega_3 не разлошаривал сыгравшего, а mega_6 не сводил ему жизни.
+        hits_everyone = card.type in ("Беспредел", "Мегабеспредел")
         entries = []
         skipped_self = False
         for target in targets:
@@ -1167,10 +1218,11 @@ class GameState:
                 player, target_amount = target
             else:
                 player, target_amount = target, amount
-            # Атака никогда не бьёт по своему хозяину: игроки постоянно
-            # промахивались по кнопке и убивали сами себя. Перенаправление
-            # атаки на себя тоже отсекается — оно идёт отдельным путём.
-            if player is None or player.id == source.id:
+            if player is None:
+                continue
+            # Обычная атака никогда не бьёт по своему хозяину: игроки
+            # промахивались по кнопке и убивали сами себя.
+            if player.id == source.id and not hits_everyone:
                 skipped_self = True
                 continue
             entries.append({"id": player.id, "amount": target_amount})
@@ -1186,7 +1238,7 @@ class GameState:
         text = f"{card.attack_text or ''} {card.full_text or ''}".lower()
         if "нельзя перенаправить" in text:
             no_redirect = True
-        self.pending_attack = {
+        attack = {
             "source_id": source.id,
             "card_id": card.id,
             "card_name": card.name,
@@ -1196,6 +1248,11 @@ class GameState:
             "on_hit": on_hit,
             "no_redirect": no_redirect,
         }
+        # Предыдущая атака ещё разрешается — эта встаёт в очередь за ней.
+        if self.pending_attack:
+            self.attack_queue.append(attack)
+            return
+        self.pending_attack = attack
         self._advance_attack()
 
     def _advance_attack(self):
@@ -1204,6 +1261,10 @@ class GameState:
             return
         if attack["index"] >= len(attack["targets"]):
             self.pending_attack = None
+            if self.attack_queue:
+                self.pending_attack = self.attack_queue.pop(0)
+                self._advance_attack()
+                return
             self._resume_market_refill()
             return
         source = self.get_player(attack["source_id"])
@@ -1213,6 +1274,7 @@ class GameState:
         if not source or not target or not target.is_alive():
             attack["index"] += 1
             self._advance_attack()
+            return
             return
 
         # У «Баклажабы» флаг защиты стоит ошибочно: в тексте только активация.
@@ -1285,9 +1347,16 @@ class GameState:
         if targets == "all_enemies":
             return self.enemies_of(source)
         if targets == "left_right":
-            idx = self.players.index(source)
-            left = self.players[(idx - 1) % len(self.players)]
-            right = self.players[(idx + 1) % len(self.players)]
+            alive = [p for p in self.players if p.is_alive()]
+            # Троих и меньше: соседи — это и есть все враги, считать стороны
+            # незачем. Бьём обоих сразу и ничего не спрашиваем.
+            if len(alive) <= 3:
+                return [p for p in alive if p.id != source.id]
+            if source not in alive:
+                return []
+            idx = alive.index(source)
+            left = alive[(idx - 1) % len(alive)]
+            right = alive[(idx + 1) % len(alive)]
             uniq = {left.id: left, right.id: right}
             uniq.pop(source.id, None)
             return list(uniq.values())
@@ -1716,6 +1785,9 @@ class GameState:
                         "text": self.zhdk.get(tid, {}).get("effect_text", ""),
                         "vp": self.zhdk.get(tid, {}).get("vp_penalty", -3),
                         "permanent": bool(self.zhdk.get(tid, {}).get("postoyanka")),
+                        # Кнопка «уничтожить за чипсины» в списке ЖДК.
+                        "buyoff_price": self.TOKEN_BUYOFF.get(tid),
+                        "can_buy_off": self.can_buy_off_token(p, tid),
                     }
                     for tid in p.death_tokens
                 ],

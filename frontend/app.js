@@ -1,3 +1,4 @@
+let freshConnection=true;
 let ws=null,myId=null,roomId=null,lastState=null,lastVisualSequence=0,lastToastSequence=0,toastTimer=null,announcedGameOver=false,pendingTargetCard=null,pendingAttackChoice=null,deferredAttackMode=false,permanentActivationCard=null,chosenAvatar='🐈‍⬛',wildTargetMode=false,lastTurnPlayer=null;
 const $=(id)=>document.getElementById(id);
 const SFX={click:'assets/audio/click.ogg',card:'assets/audio/card-play.ogg',drawer:'assets/audio/drawer.ogg',turn:'assets/audio/turn.ogg',error:'assets/audio/error.ogg'};const soundPool=Object.fromEntries(Object.entries(SFX).map(([name,url])=>{const audio=new Audio(url);audio.preload='auto';audio.volume=name==='turn'?.075:.055;return [name,audio]}));let soundOn=localStorage.getItem('krutagidon_sound')!=='off';function softTurnChime(){try{const Ctx=window.AudioContext||window.webkitAudioContext;const ctx=new Ctx();const gain=ctx.createGain();gain.gain.setValueAtTime(.0001,ctx.currentTime);gain.gain.exponentialRampToValueAtTime(.035,ctx.currentTime+.04);gain.gain.exponentialRampToValueAtTime(.0001,ctx.currentTime+.65);gain.connect(ctx.destination);[174.6,220].forEach((freq,index)=>{const osc=ctx.createOscillator();osc.type='sine';osc.frequency.setValueAtTime(freq,ctx.currentTime+index*.05);osc.connect(gain);osc.start(ctx.currentTime+index*.05);osc.stop(ctx.currentTime+.7)});setTimeout(()=>ctx.close(),800)}catch(e){}}function paperCardSound(){try{const Ctx=window.AudioContext||window.webkitAudioContext;const ctx=new Ctx();const length=Math.floor(ctx.sampleRate*.16);const buffer=ctx.createBuffer(1,length,ctx.sampleRate);const data=buffer.getChannelData(0);for(let i=0;i<length;i++)data[i]=(Math.random()*2-1)*(1-i/length);const source=ctx.createBufferSource();source.buffer=buffer;const filter=ctx.createBiquadFilter();filter.type='bandpass';filter.frequency.value=850;filter.Q.value=.7;const gain=ctx.createGain();gain.gain.setValueAtTime(.0001,ctx.currentTime);gain.gain.exponentialRampToValueAtTime(.045,ctx.currentTime+.012);gain.gain.exponentialRampToValueAtTime(.0001,ctx.currentTime+.17);source.connect(filter);filter.connect(gain);gain.connect(ctx.destination);source.start();setTimeout(()=>ctx.close(),250)}catch(e){}}function playSound(name){if(!soundOn)return;if(name==='turn'){softTurnChime();return}if(name==='card'){paperCardSound();return}const base=soundPool[name];if(!base)return;const audio=base.cloneNode();audio.volume=base.volume;try{const pr=audio.play();if(pr&&typeof pr.catch==='function')pr.catch(()=>{})}catch(e){}}
@@ -27,6 +28,16 @@ function setupInvite(){
   // Имя запоминаем: второй раз вводить не надо.
   const savedName=localStorage.getItem('krutagidon_name');
   if(savedName&&!$('name-input').value)$('name-input').value=savedName;
+  /* #18: в этой комнате уже играли — незачем заново выбирать имя и аватарку.
+     Прячем всю анкету и оставляем одну кнопку «Вернуться в игру». */
+  const known=localStorage.getItem('krutagidon_pid_'+roomId);
+  const setup=document.querySelector('.join-setup')||$('name-input')?.closest('.join-card');
+  if(known){
+    $('join-btn').textContent='Вернуться в игру';
+    document.querySelectorAll('.join-identity').forEach(el=>el.classList.add('hidden'));
+    const hint=$('join-return-hint');
+    if(hint){hint.textContent='Ты уже в этой партии — заходи под своим колдуном.';hint.classList.remove('hidden')}
+  }
 }
 function copyLink(input,btn){
   if(!input)return;
@@ -74,7 +85,7 @@ $("join-btn").onclick=()=>{
   const name=$("name-input").value.trim()||'Колдун';
   localStorage.setItem('krutagidon_name',name);
   if(!roomId)setupInvite();
-  wantConnection=true;
+  wantConnection=true;freshConnection=true;
   $("join-btn").disabled=true;$("join-btn").textContent='Подключаемся…';
   connect(name);
 };
@@ -94,7 +105,21 @@ function handleMessage(msg){if(msg.type==='pong'){return}
     }
     return;
   }
-  if(msg.type==='gm_ok'){gmToast(msg.message||'Готово');return}if(msg.type==='to_lobby'){returnToLobby();return}if(msg.type==='kicked'){handleKicked(msg);return}if(msg.type==='joined'){myId=msg.player_id;localStorage.setItem('krutagidon_pid_'+roomId,myId);$('lobby-room-code').textContent=roomId;$('room-code-game').textContent=roomId;const l=$('lobby-link');if(l)l.value=inviteUrl(roomId);if(!msg.returning)show('lobby-screen')}else if(msg.type==='lobby'){renderLobby(msg);if(msg.started)show('game-screen')}else if(msg.type==='state'){const motion=captureVisualMotion(msg.state.visual_event);lastState=msg.state;show('game-screen');render(msg.state);if(gmUnlocked&&!$('gm-modal').classList.contains('hidden'))gmRefreshPlayers();prepareVisualMotion(motion);requestAnimationFrame(()=>playVisualMotion(motion,msg.state.visual_event))}else if(msg.type==='error'){playSound('error');alert(msg.message)}}
+  if(msg.type==='gm_ok'){gmToast(msg.message||'Готово');return}if(msg.type==='to_lobby'){returnToLobby();return}if(msg.type==='kicked'){handleKicked(msg);return}if(msg.type==='joined'){myId=msg.player_id;localStorage.setItem('krutagidon_pid_'+roomId,myId);$('lobby-room-code').textContent=roomId;$('room-code-game').textContent=roomId;const l=$('lobby-link');if(l)l.value=inviteUrl(roomId);if(!msg.returning)show('lobby-screen')}else if(msg.type==='lobby'){renderLobby(msg);if(msg.started)show('game-screen')}else if(msg.type==='state'){
+    /* #18: первый state после перезахода — это «снимок» уже случившегося.
+       Прокручивать всю историю анимаций и тостов не нужно: просто
+       синхронизируем счётчики и рисуем актуальный стол. */
+    if(freshConnection){
+      freshConnection=false;
+      lastVisualSequence=msg.state.visual_event?.seq||0;
+      lastToastSequence=lastVisualSequence;
+      lastDestroySeq=msg.state.destroy_reel?.seq||0;
+      lastTurnPlayer=msg.state.turn_player_id;
+      logSeenCount=(msg.state.logs||[]).length;
+      lastState=msg.state;show('game-screen');render(msg.state);
+      return;
+    }
+    const motion=captureVisualMotion(msg.state.visual_event);lastState=msg.state;show('game-screen');render(msg.state);if(gmUnlocked&&!$('gm-modal').classList.contains('hidden'))gmRefreshPlayers();prepareVisualMotion(motion);requestAnimationFrame(()=>playVisualMotion(motion,msg.state.visual_event))}else if(msg.type==='error'){playSound('error');alert(msg.message)}}
 function show(id){['join-screen','lobby-screen','game-screen'].forEach(s=>$(s).classList.toggle('hidden',s!==id))}
 /* Хост убрал игрока из комнаты: не переподключаемся молча (v74) */
 function handleKicked(msg){
@@ -192,7 +217,13 @@ function sendRoomSettings(){ws.send(JSON.stringify({action:'configure_room',zhdk
   btn.disabled=true;
   playSound('drawer');
   ws.send(JSON.stringify({action:'resolve_event'}));
-};$('sound-toggle').textContent=soundOn?'🔊':'🔇';$('sound-toggle').onclick=()=>{soundOn=!soundOn;localStorage.setItem('krutagidon_sound',soundOn?'on':'off');$('sound-toggle').textContent=soundOn?'🔊':'🔇';if(soundOn)playSound('click')};$('add-bot-btn').onclick=()=>{playSound('click');ws.send(JSON.stringify({action:'add_bot'}))};$('start-btn').onclick=()=>{playSound('click');ws.send(JSON.stringify({action:'start_game'}));};$('end-turn-btn').onclick=()=>ws.send(JSON.stringify({action:'end_turn'}));$('buy-wild-btn').onclick=()=>ws.send(JSON.stringify({action:'buy_wild_magic'}));$('buy-familiar-btn').onclick=()=>{
+};$('sound-toggle').textContent=soundOn?'🔊':'🔇';$('sound-toggle').onclick=()=>{soundOn=!soundOn;localStorage.setItem('krutagidon_sound',soundOn?'on':'off');$('sound-toggle').textContent=soundOn?'🔊':'🔇';if(soundOn)playSound('click')};$('add-bot-btn').onclick=()=>{playSound('click');ws.send(JSON.stringify({action:'add_bot'}))};$('start-btn').onclick=()=>{playSound('click');ws.send(JSON.stringify({action:'start_game'}));};$('end-turn-btn').onclick=()=>{
+  /* #2: мощь сгорает в конце хода — предупреждаем, пока её не потратили. */
+  const meNow=lastState&&lastState.players.find(p=>p.id===myId);
+  const left=meNow?meNow.power_available:0;
+  if(left>0&&!confirm(`У тебя осталось ${left} мощи — она сгорит. Точно закончить ход?`))return;
+  ws.send(JSON.stringify({action:'end_turn'}));
+};$('buy-wild-btn').onclick=()=>ws.send(JSON.stringify({action:'buy_wild_magic'}));$('buy-familiar-btn').onclick=()=>{
   const me=lastState?.players.find(p=>p.id===myId);
   const bought=me?.bought_familiars||[];
   const list=(me?.familiars||[]).filter(f=>!bought.includes(f.id));
@@ -214,6 +245,31 @@ function sendRoomSettings(){ws.send(JSON.stringify({action:'configure_room',zhdk
   });
   $('tokens-modal').classList.remove('hidden');
 };$('target-cancel').onclick=closeTargetModal;$('attack-cancel').onclick=()=>$('attack-modal').classList.add('hidden');$('attack-later').onclick=()=>{sendPlay(pendingAttackChoice,{defer_attack:true});$('attack-modal').classList.add('hidden')};$('attack-now').onclick=()=>{const card=pendingAttackChoice;$('attack-modal').classList.add('hidden');playAttackNow(card)};$('wild-cancel').onclick=()=>$('wild-modal').classList.add('hidden');$('wild-power').onclick=()=>{sendPlay({id:'spec_wild'}, {choice:'power'});$('wild-modal').classList.add('hidden')};$('wild-steal').onclick=()=>{wildTargetMode=true;$('wild-modal').classList.add('hidden');openTargetModal({id:'spec_wild',name:'Шальная магия'})};$('log-toggle').onclick=()=>{const f=document.querySelector('.event-feed');f.classList.toggle('open');logUnread=0;renderLogBadge()};$('log-close').onclick=()=>document.querySelector('.event-feed').classList.remove('open');document.addEventListener('contextmenu',event=>{const card=event.target.closest?.('.card');if(card?._cardData){event.preventDefault();showCard(card._cardData)}else event.preventDefault()},true);document.addEventListener('dragstart',event=>event.preventDefault(),true);
+/* #4: барахолка и легенды открывались «наоборот» — крестик как будто
+   открывал окно, а клик мимо плашки её закрывал. Причина: клик по фону
+   модалки нигде не обрабатывался, а щелчок по карте всплывал наверх и
+   тут же открывал окно заново. Теперь фон закрывает окно, а клик внутри
+   плашки наружу не уходит. */
+document.addEventListener('click',event=>{
+  const modal=event.target.closest?.('.modal');
+  if(!modal||modal.classList.contains('hidden'))return;
+  const card=event.target.closest?.('.modal-card');
+  if(card){event.stopPropagation();return}
+  // Окна, требующие явного решения, по фону не закрываем.
+  if(['decision-modal','event-modal','gameover-modal','pause-overlay'].includes(modal.id))return;
+  modal.classList.add('hidden');
+  if(modal.id==='target-modal')closeTargetModal();
+});
+/* Esc закрывает верхнее необязательное окно. */
+document.addEventListener('keydown',event=>{
+  if(event.key!=='Escape')return;
+  const open=[...document.querySelectorAll('.modal:not(.hidden)')]
+    .filter(m=>!['decision-modal','event-modal','gameover-modal','pause-overlay'].includes(m.id));
+  const top=open[open.length-1];
+  if(!top)return;
+  top.classList.add('hidden');
+  if(top.id==='target-modal')closeTargetModal();
+});
 function elementFor(selector){return document.querySelector(selector)}
 function lastElementFor(selector){const all=document.querySelectorAll(selector);return all.length?all[all.length-1]:null}
 function createBotHandSource(playerId,card){
@@ -484,12 +540,18 @@ function showTokens(player){
   const eb=$('tokens-eyebrow');if(eb)eb.textContent='ЖЕТОНЫ ДОХЛОГО КОЛДУНА';
   const list=player.death_token_cards||[];
   $('tokens-title').textContent=`Жетоны: ${escapeHtml(player.name)}`;
-  $('tokens-list').innerHTML=list.length?list.map(t=>`
+  const mine=player.id===myId;
+  $('tokens-list').innerHTML=list.length?list.map((t,i)=>`
     <div class="token-row${t.permanent?' is-permanent':''}">
       <div class="token-head"><b>${escapeHtml(t.name)}</b><span>${t.vp} ПО</span></div>
       ${t.permanent?'<div class="token-flag">Действует постоянно</div>':''}
       <p>${escapeHtml(t.text||'')}</p>
+      ${mine&&t.buyoff_price?`<button class="small-action token-buyoff" data-token="${escapeHtml(t.id)}" data-i="${i}"${t.can_buy_off?'':' disabled'}>Уничтожить за ${t.buyoff_price} чипсин${t.can_buy_off?'':' — не хватает чипсин или не твой ход'}</button>`:''}
     </div>`).join(''):'<p>Жетонов пока нет.</p>';
+  // Откуп от жетона («Дорогой жетон») — кнопка прямо в списке ЖДК.
+  $('tokens-list').querySelectorAll('.token-buyoff').forEach(b=>{
+    b.onclick=()=>{ws.send(JSON.stringify({action:'buy_off_token',token_id:b.dataset.token}));$('tokens-modal').classList.add('hidden')};
+  });
   $('tokens-modal').classList.remove('hidden');
 }
 /* Список фамильяров, если их несколько (свойство «Фамильяры») — v57 */
@@ -853,7 +915,12 @@ function activateDeferredAttack(card){deferredAttackMode=true;if(cardNeedsTarget
 function openTargetModal(card){pendingTargetCard=card;$('target-card-name').textContent=card.name;/* Себя в цели не показываем НИКОГДА: сырная палочка и палочка-хреналочка
    пускали игрока бить самого себя, и по ним постоянно промахивались.
    Мёртвых тоже прячем — бить труп бессмысленно. */
-const targets=lastState.players.filter(p=>p.id!==myId&&(p.life===undefined||p.life>0));$('target-list').replaceChildren(...targets.map(p=>{const b=document.createElement('button');b.className='target-button';b.innerHTML=`<b>${escapeHtml(p.name)}</b><small>♥ ${p.life}/${p.max_life} · ☠ ЖДК ${p.death_tokens}</small>`;b.onclick=()=>{if(permanentActivationCard){sendPermanentActivation(permanentActivationCard,{target_id:p.id});permanentActivationCard=null}else if(deferredAttackMode){sendAttackActivation(card,{target_id:p.id});deferredAttackMode=false}else{sendPlay(card,wildTargetMode?{choice:'steal',target_id:p.id}:{target_id:p.id})}wildTargetMode=false;closeTargetModal()};return b}));$('target-modal').classList.remove('hidden')}
+const targets=lastState.players.filter(p=>p.id!==myId&&(p.life===undefined||p.life>0));
+/* #1: своё HP прямо в окне атаки — раньше приходилось гадать, выживешь ли. */
+const meNow=lastState.players.find(p=>p.id===myId);
+const sh=$('target-self-hp');
+if(sh&&meNow)sh.textContent=`Твоё здоровье: ♥ ${meNow.life}/${meNow.max_life} · ⚡ ${meNow.power_available} мощи`;
+$('target-list').replaceChildren(...targets.map(p=>{const b=document.createElement('button');b.className='target-button';b.innerHTML=`<b>${escapeHtml(p.name)}</b><small>♥ ${p.life}/${p.max_life} · ☠ ЖДК ${p.death_tokens}</small>`;b.onclick=()=>{if(permanentActivationCard){sendPermanentActivation(permanentActivationCard,{target_id:p.id});permanentActivationCard=null}else if(deferredAttackMode){sendAttackActivation(card,{target_id:p.id});deferredAttackMode=false}else{sendPlay(card,wildTargetMode?{choice:'steal',target_id:p.id}:{target_id:p.id})}wildTargetMode=false;closeTargetModal()};return b}));$('target-modal').classList.remove('hidden')}
 function closeTargetModal(){$('target-modal').classList.add('hidden');pendingTargetCard=null}
 function sendPlay(card,params){playSound('card');ws.send(JSON.stringify({action:'play_card',card_id:card.id,params}))}
 function sendAttackActivation(card,params){playSound('card');ws.send(JSON.stringify({action:'activate_attack',card_id:card.id,params}))}
@@ -1084,7 +1151,7 @@ function renderWaitingBanner(state){
   }
   const what=decision.waiting_title||'';
   const isDefense=/атака|беспредел|защит/i.test(what);
-  bar.innerHTML=`<span class="spin"></span><span>${isDefense?'🛡 ':''}<b>${escapeHtml(decision.waiting_for)}</b> ${isDefense?'решает, чем защищаться':'принимает решение'}${what?` — <i>${escapeHtml(what)}</i>`:''}</span>`;
+  bar.innerHTML=`<span class="spin"></span><span>Ожидай, пока ${isDefense?'🛡 ':''}<b>${escapeHtml(decision.waiting_for)}</b> ${isDefense?'выберет защиту':'выберет действие'}${what?` — <i>${escapeHtml(what)}</i>`:''}</span>`;
 }
 
 /* ===================================================================== *
