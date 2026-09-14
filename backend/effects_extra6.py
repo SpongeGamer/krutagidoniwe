@@ -174,46 +174,78 @@ def _def_suitors(game, defender, attacker, card):
              f"карту «{game.cards[victim_card].name}»")
 
 
+@effect("fam_mescalito")
+def _fam_mescalito(game, player, card, **kw):
+    """Возьми 1 карту. +1 мощь за каждый ЖДК под твоим контролем.
+
+    Верхней половины карты в коде не было вообще: ни добора, ни мощи.
+    """
+    if kw.get("attack_only", False):
+        return
+    game.draw_cards(player, 1)
+    bonus = game.zhdk_count(player)
+    if bonus:
+        player.power_available += bonus
+        game.log(f"{player.name}: Мескалито даёт +{bonus} мощи за жетоны ЖДК")
+
+
 @defense("fam_mescalito")
 def _def_mescalito(game, defender, attacker, card):
-    """Возьми 1 карту и можешь обменять свой жетон ЖДК на такой же жетон
-    атакующего, применив эффекты обоих.
+    """Возьми 1 карту, затем можешь ОБМЕНЯТЬ свой жетон на жетон атакующего.
 
-    Раньше защита только тянула карту: ни обмена, ни эффектов не было.
+    Раньше обмен требовал, чтобы у обоих был жетон с одинаковым id — такое
+    совпадение почти не случается, поэтому карта «не работала». По тексту
+    «1 такой же жетон» = ещё один жетон дохлого колдуна, любой: сначала
+    выбираем свой, потом чужой, жетоны реально меняются местами.
     """
     game.draw_cards(defender, 1)
     if not attacker or attacker.id == defender.id:
         return
 
-    # Меняться можно только жетонами одного вида — это и есть «такой же».
     mine = [t for t in defender.death_tokens if not t.startswith("sdk_")]
     his = [t for t in attacker.death_tokens if not t.startswith("sdk_")]
-    common = [t for t in mine if t in his]
-    if not common:
-        game.log(f"{defender.name}: Мескалито — одинаковых жетонов с "
-                 f"{attacker.name} нет, обмен невозможен")
+    if not mine or not his:
+        game.log(f"{defender.name}: Мескалито — меняться нечем "
+                 f"(нужен жетон и у тебя, и у {attacker.name})")
         return
 
-    options = [{"id": tid,
-                "label": game.zhdk.get(tid, {}).get("name", tid),
-                "detail": game.zhdk.get(tid, {}).get("effect_text", "")}
-               for tid in dict.fromkeys(common)]
-    options.append({"id": "skip", "label": "Не меняться"})
+    def token_options(ids):
+        return [{"id": tid,
+                 "label": game.zhdk.get(tid, {}).get("name", tid),
+                 "detail": game.zhdk.get(tid, {}).get("effect_text", "")}
+                for tid in dict.fromkeys(ids)]
 
-    def choose(choice: str):
+    def pick_mine(choice: str):
         if choice == "skip":
             return
-        name = game.zhdk.get(choice, {}).get("name", choice)
-        game.log(f"{defender.name}: Мескалито обменивает жетон «{name}» "
-                 f"с {attacker.name} — срабатывают эффекты обоих")
-        # Жетоны одинаковые, поэтому сам обмен состава рук не меняет,
-        # а вот эффекты применяются у обоих владельцев.
-        game._resolve_death_token(defender, choice, attacker)
-        game._resolve_death_token(attacker, choice, defender)
 
-    game.request_decision(defender, "Мескалито, книжный червь",
-                          "Обменять жетон дохлого колдуна и применить эффекты обоих?",
-                          options, choose)
+        def pick_his(their: str):
+            if their == "skip":
+                return
+            # Визуально меняемся: жетоны реально переезжают к новым хозяевам.
+            defender.death_tokens.remove(choice)
+            attacker.death_tokens.remove(their)
+            defender.death_tokens.append(their)
+            attacker.death_tokens.append(choice)
+            my_name = game.zhdk.get(choice, {}).get("name", choice)
+            his_name = game.zhdk.get(their, {}).get("name", their)
+            game.log(f"{defender.name}: Мескалито меняет «{my_name}» на "
+                     f"«{his_name}» с {attacker.name} — срабатывают эффекты обоих")
+            # Эффекты обоих жетонов применяются к их новым владельцам.
+            game._resolve_death_token(defender, their, attacker)
+            game._resolve_death_token(attacker, choice, defender)
+
+        game.request_decision(
+            defender, "Мескалито, книжный червь",
+            f"Теперь выбери жетон {attacker.name}, который заберёшь себе",
+            token_options(his) + [{"id": "skip", "label": "Передумать"}],
+            pick_his)
+
+    game.request_decision(
+        defender, "Мескалито, книжный червь",
+        "Обменять жетоны дохлых колдунов? Сначала выбери СВОЙ жетон",
+        token_options(mine) + [{"id": "skip", "label": "Не меняться"}],
+        pick_mine)
 
 
 @defense("leg_legdef")
@@ -259,11 +291,7 @@ def _def_glistomage(game, defender, attacker, card):
 
 @effect("wiz_punks")
 def _wiz_punks(game, player, card, **kw):
-    """Возьми 1 карту.
-
-    Было `pass` («только защита») — верхняя строка карты игнорировалась.
-    У карты НЕТ бонуса мощи: в базе ошибочно стояло +2 мощи.
-    """
+    """Возьми 1 карту. Мощи карта НЕ даёт (в базе стояло «+2 мощи»)."""
     if not kw.get("attack_only", False):
         game.draw_cards(player, 1)
 

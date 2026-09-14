@@ -120,18 +120,59 @@ def _syrnaya(game, player, card, **kw):
 
 @effect("start_hrenal")
 def _hrenalochka(game, player, card, **kw):
+    """Нанеси 1 урон. Если колдун подох — можешь отдать ему до 2 карт из сброса.
+
+    Раньше карты брались из kw["give_card_ids"], которые интерфейс никогда
+    не присылал: колдун дох, и вторая половина карты молча не срабатывала.
+    Теперь игрок выбирает карты окном, по одной, максимум две.
+    """
     if not kw.get("use_attack", True):
         return
     target_id = kw.get("target_id", player.id)  # можно себя, т.к. "колдун"
+
     def give_to_revived(target, dead):
         if not dead:
             return
-        give_ids = kw.get("give_card_ids", [])[:2]
-        for cid in give_ids:
-            if cid in player.discard:
+        # Готовый список (бот или повторный вызов) — применяем сразу.
+        preset = [c for c in kw.get("give_card_ids", []) if c in player.discard][:2]
+        if preset:
+            for cid in preset:
                 player.discard.remove(cid)
                 target.hand.append(cid)
-        game.log(f"{player.name}: {card.name} — передал(а) {len(give_ids)} карт(ы) воскресшему")
+            game.log(f"{player.name}: {card.name} — передал(а) {len(preset)} карт(ы) "
+                     f"воскресшему {target.name}")
+            return
+
+        def ask(remaining: int, given: int):
+            if remaining <= 0 or not player.discard:
+                if given:
+                    game.log(f"{player.name}: {card.name} — передал(а) {given} карт(ы) "
+                             f"воскресшему {target.name}")
+                return
+            options = [{"id": cid, "label": game.cards[cid].name,
+                        "detail": "Из твоего сброса — уйдёт ему на руку"}
+                       for cid in dict.fromkeys(player.discard)][:12]
+            options.append({"id": "stop", "label": "Хватит" if given else "Ничего не отдавать"})
+
+            def resolve(choice: str):
+                if choice == "stop":
+                    if given:
+                        game.log(f"{player.name}: {card.name} — передал(а) {given} карт(ы) "
+                                 f"воскресшему {target.name}")
+                    return
+                if choice in player.discard:
+                    player.discard.remove(choice)
+                    target.hand.append(choice)
+                    ask(remaining - 1, given + 1)
+
+            game.request_decision(
+                player, card.name,
+                f"{target.name} подох! Можешь отдать ему карты из своего сброса "
+                f"(осталось {remaining})",
+                options, resolve)
+
+        ask(2, 0)
+
     game.attack_target(player, card, target_id, 1, on_hit=give_to_revived)
 
 

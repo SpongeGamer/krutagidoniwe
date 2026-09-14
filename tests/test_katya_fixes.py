@@ -3,6 +3,15 @@ import pytest
 from backend.game import GameState
 
 
+def _resolve_all(game, limit: int = 30):
+    """Прокликать все открытые окна выбора первым вариантом."""
+    guard = 0
+    while game.pending_decision and guard < limit:
+        d = game.pending_decision
+        game.resolve_decision(game.get_player(d["player_id"]), d["options"][0]["id"])
+        guard += 1
+
+
 def new_game(names=("A", "B", "C"), seed=5):
     g = GameState(list(names), seed=seed)
     g.turn_idx = 0
@@ -297,11 +306,7 @@ def test_mortal_shows_token_only_after_killer_picks():
 
 # --- сверка с ОРИГИНАЛАМИ карт (фото прислал пользователь) ----------------
 def test_punks_draw_on_play_and_have_no_power():
-    """Бесопанки: «Возьми 1 карту», бонуса мощи у карты НЕТ.
-
-    В базе ошибочно стояло «+2 мощи», а верхняя строка «Возьми 1 карту»
-    вообще отсутствовала — эффект был заглушкой `pass`.
-    """
+    """Бесопанки: «Возьми 1 карту», мощи карта НЕ даёт (в базе было «+2 мощи»)."""
     g = new_game(("A", "B"), seed=11)
     me = g.players[0]
     me.hand = ["wiz_punks"]
@@ -387,3 +392,386 @@ def test_orangutan_alone_gives_three():
     me.power_available = 0
     g.play_card(me, "beast_orangutan")
     assert me.power_available == 3
+
+
+# ---------------------------------------------------------------------------
+# Второй заход по списку Кати: #3, #6, #8, #11, #15, #20, #21
+# ---------------------------------------------------------------------------
+
+def test_mega3_razlosharivaet_i_sygravshego():
+    """#6: mega_3 бьёт «каждого колдуна», включая того, кто её вскрыл."""
+    g = GameState(["Лошара", "Норм"], seed=5)
+    g.turn_idx = 0
+    g.set_loshara(g.players[0], True)
+    g._resolve_besp(g.cards["mega_3"])
+    _resolve_all(g)
+    assert g.players[0].is_loshara is False
+    assert g.players[1].is_loshara is True
+
+
+def test_mega6_svodit_zhizni_vsem():
+    """#21: атака с нулевым уроном обязана вызывать on_hit у всех."""
+    g = GameState(["A", "B"], seed=5)
+    g.turn_idx = 0
+    for p in g.players:
+        p.life = 25
+    g._resolve_besp(g.cards["mega_6"])
+    _resolve_all(g)
+    assert [p.life for p in g.players] == [5, 5]
+
+
+def test_svo3_predel_ruki_ne_kopitsya():
+    """#11: бонус к пределу руки не накапливается между ходами."""
+    g = GameState(["A", "B"], seed=5)
+    a = g.players[0]
+    a.property_id = "svo_3"
+    limits = []
+    for _ in range(3):
+        g.turn_idx = 0
+        a.received_this_turn = ["spell_dirtwind"]
+        g.end_turn(a)
+        limits.append(g.hand_limit(a))
+    assert limits == [6, 6, 6]
+
+
+def test_minigun_chetyre_otdelnye_ataki():
+    """#20: одна карта защиты отбивает ровно один выстрел из четырёх."""
+    g = GameState(["A", "B"], seed=5)
+    g.turn_idx = 0
+    a, b = g.players
+    b.life = 100
+    b.hand = ["beast_twin"]
+    a.hand = ["leg_minigun"]
+    g.play_card(a, "leg_minigun")
+    guard = 0
+    while g.pending_decision and guard < 30:
+        d = g.pending_decision
+        ids = [o["id"] for o in d["options"]]
+        pick = next((i for i in ids if i.startswith("defend:")), ids[0])
+        g.resolve_decision(g.get_player(d["player_id"]), pick)
+        guard += 1
+    assert b.life == 79
+
+
+def test_ukradennaya_postoyanka_lozhitsya_i_vozvrashaetsya():
+    """#3: Шальная магия кладёт постоянку на стол, а в конце хода отдаёт."""
+    g = GameState(["Вор", "Жертва"], seed=5)
+    g.turn_idx = 0
+    a, b = g.players
+    b.deck = ["leg_viagrus"]
+    a.hand = ["spec_wild"]
+    g.play_card(a, "spec_wild", choice="steal", target_id=b.id)
+    _resolve_all(g)
+    assert a.zone_in_play == ["leg_viagrus"]
+    g.end_turn(a)
+    assert a.zone_in_play == []
+    assert "leg_viagrus" in b.discard
+
+
+def test_magicspill_aktiviruetsya_i_chistit_svoyu_ruku():
+    """#15: «Волшебные отходы» — активируемая постоянка, чистит свою руку."""
+    g = GameState(["A", "B"], seed=5)
+    g.turn_idx = 0
+    a = g.players[0]
+    a.hand = ["spell_magicspill", "start_znak", "start_pshik"]
+    g.play_card(a, "spell_magicspill")
+    assert g.cards["spell_magicspill"].activation is True
+    g.activate_permanent(a, "spell_magicspill")
+    d = g.pending_decision
+    assert d is not None
+    g.resolve_decision(a, "start_pshik")
+    assert "start_pshik" not in a.hand
+
+
+# --- второй заход: #5, #7, #16, Бесопанки ---
+
+def test_nechistaya_sila_troe_bez_vyborov():
+    """#16: до трёх игроков — бьём обоих врагов, ничего не спрашивая."""
+    for n, expect in ((2, [93]), (3, [93, 93])):
+        g = GameState(["A", "B", "C"][:n], seed=5)
+        g.turn_idx = 0
+        a = g.players[0]
+        a.hand = ["beast_peepoo"]
+        for p in g.players[1:]:
+            p.life = 100
+        g.play_card(a, "beast_peepoo")
+        _resolve_all(g)
+        assert [p.life for p in g.players[1:]] == expect
+
+
+def test_nechistaya_sila_chetvero_bet_sosedey():
+    """При четверых бьёт левого и правого, средний не трогается."""
+    g = GameState(["A", "B", "C", "D"], seed=5)
+    g.turn_idx = 0
+    a = g.players[0]
+    a.hand = ["beast_peepoo"]
+    for p in g.players[1:]:
+        p.life = 100
+    g.play_card(a, "beast_peepoo")
+    _resolve_all(g)
+    assert [p.life for p in g.players[1:]] == [93, 100, 93]
+
+
+def test_konec_igry_po_lyubomu_iz_treh_usloviy():
+    """#7: игра кончается по ЛЮБОМУ условию, но витрина легенд не в счёт.
+
+    Пока на витрине легенд лежит покупаемая карта, по легендам игра не
+    заканчивается — даже если стопка легенд пуста.
+    """
+    g = GameState(["A", "B"], seed=5)
+    assert g._check_end_condition() is False
+
+    # Стопка легенд пуста, но купить с витрины ещё можно — играем дальше.
+    g.legend_deck = []
+    g.legend_market = ["leg_viagrus"]
+    assert g._check_end_condition() is False
+
+    # Легенд не осталось совсем — конец.
+    g.legend_market = []
+    assert g._check_end_condition() is True
+
+    # Барахолка обычных карт кончилась — конец.
+    g2 = GameState(["A", "B"], seed=5)
+    g2.main_deck = []
+    g2.market = []
+    assert g2._check_end_condition() is True
+
+    # Жетоны кончились — конец.
+    g3 = GameState(["A", "B"], seed=5)
+    g3.undead_token_stack = []
+    assert g3._check_end_condition() is True
+
+
+def test_dorogoy_zheton_knopkoy_a_ne_oknom():
+    """#5: откуп доступен кнопкой в любой момент своего хода."""
+    g = GameState(["A", "B"], seed=5)
+    g.turn_idx = 0
+    a = g.players[0]
+    a.death_tokens = ["dk_12", "dk_1"]
+    a.chipsines = 8
+    g.start_turn()
+    assert g.pending_decision is None          # навязчивого окна больше нет
+    assert g.can_buy_off_token(a, "dk_12") is True
+    assert g.can_buy_off_token(a, "dk_1") is False
+    assert g.buy_off_token(a, "dk_12") == {"ok": True}
+    assert a.chipsines == 3 and a.death_tokens == ["dk_1"]
+    # Только dk_12: остальные жетоны за чипсины не убираются.
+    assert "error" in g.buy_off_token(a, "dk_1")
+    # И только в свой ход.
+    assert "error" in g.buy_off_token(g.players[1], "dk_12")
+
+
+def test_besopanki_ne_dayut_moshi():
+    """Бесопанки добирают карту, но мощи не дают."""
+    g = GameState(["A", "B"], seed=5)
+    g.turn_idx = 0
+    a = g.players[0]
+    a.hand = ["wiz_punks"]
+    a.deck = ["start_znak"] * 5
+    a.power_available = 0
+    before = len(a.deck)
+    g.play_card(a, "wiz_punks")
+    assert a.power_available == 0
+    assert before - len(a.deck) == 1
+
+
+# --- третий заход: Мескалито, порядок хода ---
+
+def test_mescalito_pri_rozygryshe_karta_i_mosh():
+    """Верхняя половина карты: возьми 1 карту и +1 мощь за каждый ЖДК."""
+    g = GameState(["A", "B"], seed=5)
+    g.turn_idx = 0
+    a = g.players[0]
+    a.death_tokens = ["dk_1", "dk_5"]
+    a.hand = ["fam_mescalito"]
+    a.deck = ["start_znak"] * 5
+    a.power_available = 0
+    before = len(a.deck)
+    g.play_card(a, "fam_mescalito")
+    assert before - len(a.deck) == 1
+    assert a.power_available == 2
+
+
+def test_mescalito_menyaet_zhetony_pri_zashite():
+    """#17: защита меняет жетон на ЛЮБОЙ жетон атакующего, а не на тот же id."""
+    g = GameState(["Защ", "Атк"], seed=5)
+    g.turn_idx = 1
+    d, a = g.players
+    d.death_tokens = ["dk_1"]
+    a.death_tokens = ["dk_5", "dk_7"]
+    d.hand = ["fam_mescalito"]
+    d.life = 100
+    a.hand = ["start_syrpal"]
+    g.play_card(a, "start_syrpal", target_id=d.id)
+    guard = 0
+    while g.pending_decision and guard < 12:
+        dec = g.pending_decision
+        ids = [o["id"] for o in dec["options"]]
+        pick = next((i for i in ids if i.startswith("defend:")), None)
+        if pick is None:
+            pick = next(i for i in ids if i not in ("skip",))
+        g.resolve_decision(g.get_player(dec["player_id"]), pick)
+        guard += 1
+    # Жетоны реально поменялись местами.
+    assert "dk_1" in a.death_tokens
+    assert "dk_1" not in d.death_tokens
+    assert len(d.death_tokens) == 1
+    assert d.life == 100                 # атака отбита
+
+
+def test_mescalito_bez_zhetonov_prosto_zashita():
+    """Если меняться нечем — просто защита и добор карты, без окон."""
+    g = GameState(["Защ", "Атк"], seed=5)
+    g.turn_idx = 1
+    d, a = g.players
+    d.death_tokens = []
+    a.death_tokens = ["dk_5"]
+    d.hand = ["fam_mescalito"]
+    d.life = 100
+    a.hand = ["start_syrpal"]
+    g.play_card(a, "start_syrpal", target_id=d.id)
+    dec = g.pending_decision
+    g.resolve_decision(d, "defend:fam_mescalito")
+    assert d.life == 100
+    assert g.pending_decision is None     # окна обмена не появилось
+
+
+def test_hod_peredaetsya_do_bespredelov():
+    """#13: сначала «Ход игрока», только потом беспределы и мегабеспределы."""
+    g = GameState(["A", "B"], seed=3)
+    g.turn_idx = 0
+    besp = next(c for c in g.cards.values() if c.type == "Беспредел")
+    mega = next(c for c in g.cards.values() if c.type == "Мегабеспредел")
+    g.main_deck.append(besp.id)
+    g.legend_deck.append(mega.id)
+    g.market = g.market[:-1]
+    g.legend_market = g.legend_market[:-1]
+    start = len(g.logs)
+    g.end_turn(g.players[0])
+    guard = 0
+    while (g.pending_event or g.pending_decision) and guard < 25:
+        if g.pending_event:
+            for p in g.players:
+                g.resolve_event(p)
+        else:
+            dec = g.pending_decision
+            g.resolve_decision(g.get_player(dec["player_id"]), dec["options"][0]["id"])
+        guard += 1
+    order = [l for l in g.logs[start:]
+             if "Ход игрока" in l or "БЕСПРЕДЕЛ показан" in l or "МЕГАБЕСПРЕДЕЛ показан" in l]
+    assert "Ход игрока" in order[0], order
+    assert "БЕСПРЕДЕЛ показан" in order[1], order
+
+
+# --- #19: неизбежные атаки ---
+
+def test_hrenalochka_palochki_nelzya_izbezhat():
+    """#19: у svo_10 от ЛЮБОЙ палочки защититься нельзя, урон +1."""
+    g = GameState(["Атк", "Защ"], seed=5)
+    g.turn_idx = 0
+    a, d = g.players
+    a.property_id = "svo_10"
+    d.life = 100
+    d.hand = ["beast_twin"]
+    a.hand = ["start_syrpal"]
+    g.play_card(a, "start_syrpal", target_id=d.id)
+    assert g.pending_decision is None          # окна защиты нет
+    assert d.life == 98                        # 1 урон + 1 от свойства
+    assert d.hand == ["beast_twin"]            # защиту сбросить не дали
+
+
+def test_hrenalochka_ne_trogaet_nepalochki():
+    """Свойство действует только на палочки — остальные атаки отбиваются."""
+    g = GameState(["Атк", "Защ"], seed=5)
+    g.turn_idx = 0
+    a, d = g.players
+    a.property_id = "svo_10"
+    d.life = 100
+    d.hand = ["beast_twin"]
+    a.hand = ["beast_peepoo"]
+    g.play_card(a, "beast_peepoo")
+    assert g.pending_decision is not None
+
+
+def test_obychnyy_igrok_ot_palochki_zashishaetsya():
+    """Без свойства палочка остаётся обычной атакой."""
+    g = GameState(["Атк", "Защ"], seed=5)
+    g.turn_idx = 0
+    a, d = g.players
+    d.life = 100
+    d.hand = ["beast_twin"]
+    a.hand = ["start_syrpal"]
+    g.play_card(a, "start_syrpal", target_id=d.id)
+    assert g.pending_decision is not None
+
+
+def test_benzopila_delaet_sleduyushchuyu_ataku_neizbezhnoy():
+    """«Бензопила Дружок»: следующей атаки в этот ход нельзя избежать."""
+    g = GameState(["Атк", "Защ"], seed=5)
+    g.turn_idx = 0
+    a, d = g.players
+    d.life = 100
+    d.hand = ["beast_twin"]
+    a.hand = ["fam_benz", "start_syrpal"]
+    g.play_card(a, "fam_benz")
+    _resolve_all(g)
+    g.play_card(a, "start_syrpal", target_id=d.id)
+    assert g.pending_decision is None
+    assert d.life == 99
+
+
+# --- Палочка-хреналочка: передача карт после убийства ---
+
+def test_hrenalochka_predlagaet_otdat_karty_posle_ubiystva():
+    """Колдун подох — можно отдать ему до 2 карт из своего сброса.
+
+    Эффект ждал give_card_ids от интерфейса, который их не присылал:
+    вторая половина карты не срабатывала вообще.
+    """
+    g = GameState(["Атк", "Жертва"], seed=5)
+    g.turn_idx = 0
+    a, d = g.players
+    a.hand = ["start_hrenal"]
+    a.discard = ["start_znak", "start_pshik", "start_syrpal"]
+    d.life = 1
+    g.play_card(a, "start_hrenal", target_id=d.id)
+    assert g.pending_decision is not None
+    g.resolve_decision(a, "start_znak")
+    assert "start_znak" not in a.discard
+    assert "start_znak" in d.hand
+    # Предлагают вторую карту, отказываемся.
+    assert g.pending_decision is not None
+    g.resolve_decision(a, "stop")
+    assert g.pending_decision is None
+
+
+def test_hrenalochka_maksimum_dve_karty():
+    """Больше двух карт отдать нельзя."""
+    g = GameState(["Атк", "Жертва"], seed=5)
+    g.turn_idx = 0
+    a, d = g.players
+    a.hand = ["start_hrenal"]
+    a.discard = ["start_znak", "start_pshik", "start_syrpal", "start_znak"]
+    d.life = 1
+    hand_before = len(d.hand)
+    g.play_card(a, "start_hrenal", target_id=d.id)
+    guard = 0
+    while g.pending_decision and guard < 6:
+        dec = g.pending_decision
+        ids = [o["id"] for o in dec["options"] if o["id"] != "stop"]
+        g.resolve_decision(a, ids[0])
+        guard += 1
+    assert len(d.hand) - hand_before == 2
+
+
+def test_hrenalochka_bez_ubiystva_nichego_ne_sprashivaet():
+    """Цель выжила — предложения передать карты быть не должно."""
+    g = GameState(["Атк", "Жертва"], seed=5)
+    g.turn_idx = 0
+    a, d = g.players
+    a.hand = ["start_hrenal"]
+    a.discard = ["start_znak", "start_pshik"]
+    d.life = 25
+    g.play_card(a, "start_hrenal", target_id=d.id)
+    assert g.pending_decision is None
+    assert a.discard == ["start_znak", "start_pshik"]

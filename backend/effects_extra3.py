@@ -89,6 +89,11 @@ def holest(game, player, card, **kw):
 
 @effect("leg_rlyeh")
 def rlyeh(game, player, card, **kw):
+    """Мальчишник в Р'льехе: все берут 2 карты, враги сбрасывают 2 случайные.
+
+    Урон равен сумме стоимостей сброшенного, поэтому игрок обязан видеть,
+    ЧТО именно у него улетело — иначе цифра урона берётся из ниоткуда.
+    """
     if kw.get("attack_only", False):
         return
     for target in game.players:
@@ -101,6 +106,17 @@ def rlyeh(game, player, card, **kw):
                 cid=target.hand.pop(game.rng.randrange(len(target.hand)))
                 target.discard.append(cid); dropped.append(cid)
         damage=sum(game.cards[cid].cost for cid in dropped)
+        if dropped:
+            names = ", ".join(f"«{game.cards[c].name}» ({game.cards[c].cost})" for c in dropped)
+            game.log(f"{target.name}: Мальчишник сбрасывает {names} — итого {damage} урона")
+            game.emit_visual_event("discard", target, dropped, "hand", "discard")
+            # Показываем сброшенные карты самому пострадавшему.
+            game.request_decision(
+                target, card.name,
+                f"Случайно сброшено 2 карты — ты отхватываешь {damage} урона.",
+                [{"id": "ok", "label": "Понятно"}],
+                lambda _choice: None,
+                revealed_cards=[game.card_public(c) for c in dropped])
         game.deal_damage(player,target.id,damage,card.name,defendable=False,unavoidable=True)
 
 

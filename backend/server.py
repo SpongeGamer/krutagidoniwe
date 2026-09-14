@@ -70,6 +70,10 @@ class Room:
         self.selected_familiars: dict[str, list[str]] = {}
         self.started = False
         self.host_id: Optional[str] = None
+        # Кто создал комнату. Хостом остаётся он — даже если вылетел и зашёл
+        # заново через час. Раньше права уходили первому попавшемуся игроку,
+        # и вернувшийся хост уже не мог менять настройки своей же комнаты.
+        self.founder_id: Optional[str] = None
         self.settings = {"zhdk_mode": "standard", "zhdk_count": None}
         # Пауза: партия замирает, пока кто-то отвалился или все решили отдохнуть.
         self.offline: set[str] = set()
@@ -427,7 +431,12 @@ async def ws_endpoint(websocket: WebSocket, room_id: str):
             room.ensure_property_offer(player_id)
 
         room.connections[player_id] = websocket
-        if room.host_id is None or room.host_id not in room.player_names:
+        if room.founder_id is None:
+            room.founder_id = player_id
+        # Основатель вернулся — забирает хоста назад.
+        if player_id == room.founder_id:
+            room.host_id = player_id
+        elif room.host_id is None or room.host_id not in room.player_names:
             room.host_id = player_id
         await websocket.send_json({
             "type": "joined",
@@ -555,7 +564,10 @@ async def ws_endpoint(websocket: WebSocket, room_id: str):
                 count = None
                 if mode == "custom":
                     try:
-                        count = max(1, min(35, int(msg.get("zhdk_count", 12))))
+                        # Жетонов ровно 30 (dk_1…dk_30). Раньше стояло 35:
+                        # в счёт ошибочно попадали пятеро Дохляков (sdk_*),
+                        # а они карты, а не жетоны, и в мешок не кладутся.
+                        count = max(1, min(30, int(msg.get("zhdk_count", 12))))
                     except (ValueError, TypeError):
                         count = 12
                 room.settings = {"zhdk_mode": mode, "zhdk_count": count}
@@ -697,6 +709,8 @@ async def ws_endpoint(websocket: WebSocket, room_id: str):
                 result = room.game.buy_wild_magic(gp)
             elif action == "buy_familiar":
                 result = room.game.buy_familiar(gp, msg.get("card_id"), msg.get("use_chipsines"))
+            elif action == "buy_off_token":
+                result = room.game.buy_off_token(gp, msg.get("token_id"))
             elif action == "end_turn":
                 result = room.game.end_turn(gp)
 
@@ -726,6 +740,9 @@ async def ws_endpoint(websocket: WebSocket, room_id: str):
             if room.host_id == player_id:
                 humans = [p for p in room.player_names if not room.is_bot(p)]
                 room.host_id = humans[0] if humans else None
+                # Основатель ушёл до старта совсем — комната больше не его.
+                if player_id == room.founder_id:
+                    room.founder_id = room.host_id
             await room.broadcast_lobby()
 
 
