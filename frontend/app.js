@@ -218,10 +218,12 @@ function sendRoomSettings(){ws.send(JSON.stringify({action:'configure_room',zhdk
   playSound('drawer');
   ws.send(JSON.stringify({action:'resolve_event'}));
 };$('sound-toggle').textContent=soundOn?'🔊':'🔇';$('sound-toggle').onclick=()=>{soundOn=!soundOn;localStorage.setItem('krutagidon_sound',soundOn?'on':'off');$('sound-toggle').textContent=soundOn?'🔊':'🔇';if(soundOn)playSound('click')};$('add-bot-btn').onclick=()=>{playSound('click');ws.send(JSON.stringify({action:'add_bot'}))};$('start-btn').onclick=()=>{playSound('click');ws.send(JSON.stringify({action:'start_game'}));};$('end-turn-btn').onclick=()=>{
-  /* #2: мощь сгорает в конце хода — предупреждаем, пока её не потратили. */
+  /* #2: мощь сгорает в конце хода — предупреждаем, пока её не потратили.
+     Порог 2, а не 0 (правка Егора): почти все карты стоят от 3, поэтому
+     напоминание про 1-2 мощи чаще всего бесполезно и только раздражает. */
   const meNow=lastState&&lastState.players.find(p=>p.id===myId);
   const left=meNow?meNow.power_available:0;
-  if(left>0&&!confirm(`У тебя осталось ${left} мощи — она сгорит. Точно закончить ход?`))return;
+  if(left>2&&!confirm(`У тебя осталось ${left} мощи — она сгорит. Точно закончить ход?`))return;
   ws.send(JSON.stringify({action:'end_turn'}));
 };$('buy-wild-btn').onclick=()=>ws.send(JSON.stringify({action:'buy_wild_magic'}));$('buy-familiar-btn').onclick=()=>{
   const me=lastState?.players.find(p=>p.id===myId);
