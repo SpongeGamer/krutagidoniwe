@@ -795,107 +795,6 @@ input { user-select:text; -webkit-user-select:text; }
 #pay-range{width:100%;accent-color:#ffd34e;cursor:pointer}
 .pay-hint{color:#bfaec2;font-size:11px}
 
-/* ============ v74: КАРТА РАССЫПАЕТСЯ НА КУСКИ ============
-   Раньше «огонь» рисовался ПОД карточкой в пустоте — выглядело мусорно.
-   Теперь рассыпается сама карта: она нарезана на плитки (по 4x6),
-   каждая плитка — копия картинки со сдвинутым background-position,
-   куски разлетаются в стороны, крутятся и гаснут. Всё на CSS. */
-.burn-layer{
-  position:fixed;z-index:460;inset:0;display:grid;place-items:center;
-  padding:20px;background:radial-gradient(ellipse at center,#2a0b04d9,#07030bf2);
-  pointer-events:none;opacity:0;transition:opacity .25s;
-}
-.burn-layer.run{opacity:1}
-.burn-stage{display:grid;justify-items:center;gap:14px;max-width:min(560px,92vw);text-align:center}
-.burn-eyebrow{
-  color:#ffb057;font-family:'Russo One',Impact,sans-serif;font-size:13px;
-  letter-spacing:.28em;text-shadow:0 0 14px #ff6a1e;
-}
-.burn-layer.run .burn-eyebrow{animation:burn-eyebrow .5s ease both}
-@keyframes burn-eyebrow{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
-
-/* Сцена карты: тут лежат и целая карта, и её осколки — строго друг на друге. */
-.burn-card{
-  position:relative;width:min(230px,52vw);aspect-ratio:708/1000;
-  filter:drop-shadow(0 16px 34px #000);
-}
-/* Целая карта: видна в начале, потом мгновенно прячется, уступая осколкам. */
-.burn-whole{position:absolute;inset:0;border-radius:11px;overflow:hidden;background:#2a1533}
-.burn-whole img{display:block;width:100%;height:100%;object-fit:cover}
-.burn-layer.run .burn-whole{animation:burn-whole 2.9s linear forwards}
-@keyframes burn-whole{
-  0%{opacity:0;transform:scale(.86) rotate(-3deg)}
-  10%{opacity:1;transform:scale(1.03) rotate(0)}
-  26%{opacity:1;transform:scale(1)}
-  /* дрожь перед разломом */
-  30%{transform:translate3d(-3px,0,0) scale(1)}
-  33%{transform:translate3d(3px,0,0) scale(1)}
-  36%{transform:translate3d(-2px,1px,0) scale(1)}
-  39%{opacity:1;transform:none}
-  40%{opacity:0}
-  100%{opacity:0}
-}
-.burn-fallback{
-  display:grid;align-content:center;gap:7px;width:100%;height:100%;padding:14px;
-  border:2px solid #e0a94f;border-radius:11px;background:linear-gradient(150deg,#4a2a52,#20122a);
-}
-.burn-fallback b{color:#ffe3a4;font-size:15px;line-height:1.2}
-.burn-fallback small{color:#d9c7dd;font-size:11px;line-height:1.3}
-
-/* Осколки: сетка плиток поверх карты. */
-.burn-shards{position:absolute;inset:0;pointer-events:none}
-.burn-shards .shard{
-  position:absolute;overflow:hidden;opacity:0;
-  background-repeat:no-repeat;
-  will-change:transform,opacity;
-  /* рваный край — каждый кусок обрезан по своему многоугольнику */
-  clip-path:polygon(var(--clip,0% 0%,100% 0%,100% 100%,0% 100%));
-}
-.burn-shards .shard img{position:absolute;max-width:none;display:block}
-.burn-layer.run .burn-shards .shard{animation:shard-fly var(--dur,1.5s) cubic-bezier(.2,.6,.35,1) var(--delay,0s) forwards}
-@keyframes shard-fly{
-  0%{opacity:0;transform:translate3d(0,0,0) rotate(0) scale(1)}
-  1%{opacity:1}
-  55%{opacity:1}
-  100%{
-    opacity:0;
-    transform:translate3d(var(--tx,0),var(--ty,0),0) rotate(var(--rot,0deg)) scale(var(--sc,.7));
-  }
-}
-/* Тлеющая подсветка на изломе — куски будто раскалены по краю. */
-.burn-shards .shard:after{
-  content:'';position:absolute;inset:0;
-  background:linear-gradient(var(--ang,45deg),#ff9a2e88,transparent 55%);
-  mix-blend-mode:screen;opacity:0;
-}
-.burn-layer.run .burn-shards .shard:after{animation:shard-glow var(--dur,1.5s) ease-out var(--delay,0s) forwards}
-@keyframes shard-glow{0%{opacity:0}18%{opacity:.9}100%{opacity:0}}
-
-/* Вспышка в момент разлома */
-.burn-flash{position:absolute;inset:-18%;border-radius:50%;opacity:0;
-  background:radial-gradient(circle,#ffd98a88,#ff6a1e33 40%,transparent 68%)}
-.burn-layer.run .burn-flash{animation:burn-flash 2.9s ease-out forwards}
-@keyframes burn-flash{0%,36%{opacity:0;transform:scale(.6)}42%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1.35)}}
-
-.burn-copy{display:grid;gap:5px;max-width:460px}
-.burn-name{color:#ffe0a5;font-family:'Russo One',Impact,sans-serif;font-size:clamp(19px,3.4vw,27px);text-shadow:0 2px 10px #ff5c0f88}
-.burn-type{color:#ffab63;font-size:11px;font-weight:900;letter-spacing:.2em;text-transform:uppercase}
-.burn-text{color:#eadce9;font-size:13px;line-height:1.35}
-.burn-reason{
-  margin-top:4px;padding:7px 13px;border:1px solid #ff9a3c88;border-radius:999px;
-  color:#ffd9a8;font-size:12px;font-weight:800;background:#3a150699;
-}
-.burn-layer.run .burn-copy{animation:burn-copy .6s .18s ease both}
-@keyframes burn-copy{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
-@media(max-width:600px){
-  .burn-card{width:min(170px,46vw)}
-  .burn-text{font-size:12px}
-}
-@media(prefers-reduced-motion:reduce){
-  .burn-layer.run .burn-whole,.burn-layer.run .burn-shards .shard,
-  .burn-layer.run .burn-flash{animation-duration:.01ms!important}
-}
-
 /* v73: кнопки итогового окна — хост уводит всех в лобби */
 .gameover-actions{display:flex;justify-content:center;gap:10px;margin-top:14px;flex-wrap:wrap}
 .gameover-actions .small-action{width:auto;padding:10px 18px;font-size:12px}
@@ -956,7 +855,6 @@ input { user-select:text; -webkit-user-select:text; }
 .flying-card      { z-index:900 }    /* анимация полёта — под окнами */
 .turn-overlay     { z-index:880 }
 .besp-burst       { z-index:1150 }
-.burn-layer       { z-index:1160 }
 .gm-toast         { z-index:1800 }
 
 /* --- #2: ящики барахолки и легенд закрываются нормально --- */
@@ -1003,3 +901,120 @@ input { user-select:text; -webkit-user-select:text; }
 
 /* #18: подсказка при возвращении в уже начатую партию */
 .join-return-hint{margin:6px 0 10px;color:#9be29b;font-weight:600;text-align:center}
+
+
+/* v77 — desktop: неблокирующая лента уничтожений и игровые диалоги.
+   Сохраняем палитру стола. Лента выше обязательных окон, ниже лупы. */
+.destroy-notices{position:fixed;z-index:1500;right:20px;top:20px;width:300px;
+  overflow:hidden;border:1px solid #e5aa666e;border-radius:14px;
+  color:#fff3e0;background:#24152ef5;box-shadow:0 12px 36px #08030c88;}
+.destroy-header{display:flex;align-items:center;justify-content:space-between;
+  gap:12px;padding:16px 16px 12px;border-bottom:1px solid #ffffff16;}
+.destroy-header .eyebrow{font-size:10px;letter-spacing:.14em;color:#ffba78;}
+.destroy-header h2{margin:5px 0 0;font:700 18px/1.25 'Source Sans 3',Arial,sans-serif;}
+#destroy-count{margin-left:4px;color:#dfbfdf;font-size:14px;font-weight:400;}
+#destroy-hide,.destroy-dismiss{flex:none;border-radius:8px;color:#ddc7df;background:transparent;font-size:24px;}
+#destroy-hide{width:36px;height:36px;}
+#destroy-hide:hover,.destroy-dismiss:hover{color:#fff;background:#ffffff12;}
+.destroy-list{display:grid;gap:8px;padding:12px;max-height:calc(100vh - 180px);overflow:auto;scrollbar-color:#86516c #24152e;}
+.destroy-notice{position:relative;display:grid;grid-template-columns:58px minmax(0,1fr);gap:12px;
+  padding:12px 28px 12px 10px;border:1px solid #bf755744;border-radius:10px;
+  background:linear-gradient(115deg,#54303b70,#35203b);animation:destroy-arrive .24s ease-out both;}
+.destroy-thumb{display:grid;place-items:center;align-self:start;width:58px;height:82px;
+  overflow:hidden;border:1px solid #c89559;border-radius:6px;background:#3c273c;color:#ffc475;cursor:zoom-in;}
+.destroy-thumb img{width:100%;height:100%;object-fit:cover;}
+.destroy-copy{min-width:0;overflow-wrap:anywhere;}
+.destroy-who{margin-bottom:5px;font-size:12px;line-height:1.4;color:#ffc18d;}
+.destroy-name{display:block;font-size:15px;line-height:1.3;color:#fff3e0;}
+.destroy-reason{margin:7px 0 0;font-size:13px;line-height:1.45;color:#dccbdd;}
+.destroy-dismiss{position:absolute;right:2px;top:4px;width:26px;height:30px;font-size:20px;}
+.destroy-footnote{margin:0;padding:2px 16px 14px;color:#c9b1ce;font-size:12px;line-height:1.4;}
+@keyframes destroy-arrive{from{opacity:0;transform:translateX(12px)}to{opacity:1;transform:none}}
+/* Не допускаем пересечения ленты с вариантами обязательного выбора. */
+@media(min-width:1000px){
+  body.has-destroy-notices #decision-modal,body.has-destroy-notices #event-modal{padding-right:348px;}
+}
+#ui-dialog{z-index:1550;}
+.ui-dialog-card{width:min(500px,100%);padding:30px;border-radius:14px;}
+.ui-dialog-card h2{font-size:26px;line-height:1.2;padding-right:10px;}
+#ui-dialog-text{margin:18px 0 24px;color:#e6d3e7;font-size:17px;line-height:1.55;white-space:pre-line;}
+.ui-dialog-actions{display:flex;justify-content:flex-end;gap:12px;}
+.ui-dialog-actions button{min-height:44px;padding:11px 18px;border-radius:9px;font-size:15px;font-weight:700;}
+#ui-dialog-cancel{color:#f5e5f5;border:1px solid #c39eb870;background:#39243e;}
+#ui-dialog-cancel:hover{background:#50324f;}
+#ui-dialog-confirm.is-danger{color:#fff3ed;background:linear-gradient(#be4b45,#942f37);box-shadow:0 3px #602035;}
+#ui-dialog button:focus-visible,.destroy-notices button:focus-visible{outline:2px solid #ffdb7b;outline-offset:3px;}
+@media(prefers-reduced-motion:reduce){.destroy-notice{animation:none;}}
+
+.destroy-thumb{padding:0;}
+#decision-modal .modal-card{max-height:calc(100vh - 40px);overflow:auto;}
+
+.destroy-header,.destroy-notices{background-color:#24152e;}
+.destroy-footer{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 12px 12px;}
+.destroy-footer .destroy-footnote{margin:0;padding:0;font-size:12px;}
+#destroy-clear{padding:7px 9px;border:1px solid #9a708866;border-radius:7px;color:#ead6ec;background:#39243e;font-size:12px;}
+.destroy-history-button{padding:6px 10px;border:1px solid #e5aa666e;border-radius:8px;color:#ffd49f;background:#342037;font-size:12px;white-space:nowrap;}
+.destroy-summary{position:fixed;z-index:1500;left:50%;top:84px;transform:translateX(-50%);
+  width:max-content;max-width:min(460px,60vw);padding:12px 18px;border:1px solid #e5aa66;
+  border-radius:10px;color:#ffe9d5;background:#382137;box-shadow:0 6px 20px #0006;
+  font-size:15px;line-height:1.4;text-align:center;}
+body.has-destroy-notices .destroy-summary{display:none;}
+/* История открывается по запросу и не скрывает панель паузы/звука. */
+.destroy-notices{top:84px;}
+.destroy-list{max-height:calc(100vh - 250px);}
+/* У старого decision-card ширина зависела от viewport, а не от свободной
+   области модалки. Теперь боковая лента действительно резервирует место. */
+#decision-modal .modal-card{width:min(820px,100%);}
+#decision-modal .reveal-row{justify-content:flex-start;}
+@media(min-width:1000px){body.has-destroy-notices #event-modal .modal-card{max-width:100%;}}
+
+
+/* v78 — свободная зона выкладки, вместо неограниченной сетки под игроками. */
+.played-zone{position:absolute;z-index:25;display:flex;flex-direction:column;padding:10px;
+  border:1px solid #d3bc7940;border-radius:12px;background:#102c2788;overflow:hidden;}
+.played-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  min-height:32px;margin-bottom:8px;color:#d8e7d0;font-size:12px;}
+.played-heading b{color:#ffe39d;}
+#played-expand,.played-fallback{padding:6px 10px;border:1px solid #dbc77b55;border-radius:7px;
+  color:#ffe4aa;background:#203932;font-size:12px;}
+.played-zone .played-cards{position:static;display:grid;flex:1;min-height:0;max-width:none;
+  width:100%;margin:0;transform:none;gap:8px;justify-content:center;align-content:start;
+  overflow-y:auto;overflow-x:hidden;scrollbar-color:#7b9273 #153029;scrollbar-width:thin;padding:2px;}
+.played-zone .played-cards .card{width:var(--played-width,104px);flex-basis:auto;}
+.played-zone .played-cards .card:hover{transform:none;filter:brightness(1.08);}
+.played-zone .played-cards .card-info{height:calc(var(--played-width,104px) * 1000 / 708);min-height:0;overflow:hidden;}
+.played-zone.is-scrollable{border-color:#e1c37488;}
+.played-zone.is-scrollable .played-heading:after{content:'↕';color:#ffe39d;}
+.played-fallback{position:absolute;z-index:70;left:50%;top:50%;transform:translate(-50%,-50%);}
+.played-gallery{width:min(1060px,94vw);max-height:90vh;overflow:auto;}
+.played-gallery h2{padding-right:24px;}
+.played-all-cards{display:flex;flex-wrap:wrap;justify-content:flex-start;gap:14px;padding:18px 0 4px;}
+.played-all-cards .card{width:126px;flex:0 0 126px;}
+.played-all-cards .card:hover{transform:none;}
+#played-modal{z-index:1300;}
+#card-modal{z-index:1900;} /* Лупа доступна также поверх панели ведущего. */
+.reconnect-button{position:fixed;z-index:1400;top:52px;left:50%;transform:translateX(-50%);
+  padding:9px 14px;border:1px solid #ffd36d;border-radius:8px;color:#ffe7b3;background:#38213c;}
+.gm-card-preview{display:grid;grid-template-columns:90px minmax(0,1fr);gap:16px;
+  margin-top:12px;padding:14px;border:1px solid #7ce0a047;border-radius:10px;background:#162b29;}
+#gm-preview-art{align-self:start;width:90px;min-height:126px;padding:0;border:1px solid #7ce0a066;
+  border-radius:7px;overflow:hidden;color:#b5d5c8;background:#101d1e;cursor:zoom-in;}
+#gm-preview-art img{display:block;width:100%;height:auto;}
+.gm-preview-type{color:#9fc6b6;font-size:12px;}
+#gm-preview-title{margin:7px 0;color:#ecf6de;font-size:18px;line-height:1.3;}
+#gm-preview-text{margin:7px 0 0;color:#d3e5d9;font-size:15px;line-height:1.5;white-space:pre-line;}
+#gm-modal .gm-row{min-width:0;}
+#gm-card{flex:1;min-width:160px!important;max-width:100%;}
+#gm-card-search{flex:1;}
+#gm-modal .gm-row select{max-width:100%;}
+
+.table-stage.compact-seats .opp-card{width:210px!important;}
+.table-stage.compact-seats .player-core{grid-template-columns:42px minmax(104px,1fr) 48px!important;gap:8px!important;}
+.table-stage.compact-seats .avatar-box{width:42px!important;min-height:68px!important;font-size:25px!important;}
+.table-stage.compact-seats .familiar-card{width:48px!important;min-height:68px!important;}
+.table-stage.compact-seats .player-main{min-height:68px;padding:4px!important;}
+.table-stage.compact-seats .player-name{font-size:12px!important;}
+.played-zone.is-narrow .played-heading:after{display:none;}
+.played-heading{flex:none;}
+
+#gm-preview-art{font-size:12px;line-height:1.4;overflow-wrap:anywhere;}

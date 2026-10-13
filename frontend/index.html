@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="ru">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Крутагидон Online</title><link rel="stylesheet" href="style.css?v=76"></head>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Крутагидон Online</title><link rel="stylesheet" href="style.css?v=78"></head>
 <body>
 <main>
   <section id="join-screen" class="screen join-screen">
@@ -12,9 +12,9 @@
   </section>
 
   <section id="game-screen" class="screen game-screen hidden">
-    <div id="activity-toast" class="activity-toast hidden"></div><div id="link-state" class="link-state hidden"></div>
-    <div id="turn-overlay" class="turn-overlay hidden"></div><div id="besp-burst" class="besp-burst hidden"><div class="besp-glow"></div><div class="besp-embers"></div><div class="besp-word"><span>Б</span><span>Е</span><span>С</span><span>П</span><span>Р</span><span>Е</span><span>Д</span><span>Е</span><span>Л</span><span>!</span></div></div><div id="burn-layer" class="burn-layer hidden"></div><div id="pause-overlay" class="pause-overlay hidden"><div class="pause-card"><div class="pause-icon">⏸</div><h2 id="pause-title">Пауза</h2><p id="pause-reason"></p><button id="pause-resume" class="button-primary">Продолжить игру</button></div></div>
-    <header class="game-header"><div class="brand"><span>КРУТА</span>ГИДОН <small>ONLINE</small></div><div id="turn-banner" class="turn-banner">Подготовка партии</div><div class="header-tools"><button id="pause-btn" class="sound-toggle" title="Перерыв — поставить игру на паузу">⏸</button><button id="sound-toggle" class="sound-toggle" title="Включить или выключить звуки">🔊</button><div class="room-pill">КОМНАТА <b id="room-code-game">—</b></div></div></header>
+    <div id="activity-toast" class="activity-toast hidden"></div><div id="link-state" class="link-state hidden"></div><button id="reconnect-btn" class="reconnect-button hidden" type="button">Подключиться заново</button>
+    <div id="turn-overlay" class="turn-overlay hidden"></div><div id="besp-burst" class="besp-burst hidden"><div class="besp-glow"></div><div class="besp-embers"></div><div class="besp-word"><span>Б</span><span>Е</span><span>С</span><span>П</span><span>Р</span><span>Е</span><span>Д</span><span>Е</span><span>Л</span><span>!</span></div></div><div id="pause-overlay" class="pause-overlay hidden"><div class="pause-card"><div class="pause-icon">⏸</div><h2 id="pause-title">Пауза</h2><p id="pause-reason"></p><button id="pause-resume" class="button-primary">Продолжить игру</button></div></div>
+    <header class="game-header"><div class="brand"><span>КРУТА</span>ГИДОН <small>ONLINE</small></div><div id="turn-banner" class="turn-banner">Подготовка партии</div><div class="header-tools"><button id="destroy-history-button" type="button" class="destroy-history-button hidden" aria-controls="destroy-notices" aria-expanded="false" title="Показать историю уничтожений">Уничтожения</button><button id="pause-btn" class="sound-toggle" title="Перерыв — поставить игру на паузу">⏸</button><button id="sound-toggle" class="sound-toggle" title="Включить или выключить звуки">🔊</button><div class="room-pill">КОМНАТА <b id="room-code-game">—</b></div></div></header>
     <div class="board-shell">
       <aside class="supply-rail">
         <button class="supply-stack" title="Основная колода"><img src="assets/cards/card_closed.webp" alt="Основная колода"><span>Барахолка <b id="main-deck-count"></b></span></button>
@@ -24,7 +24,7 @@
       </aside>
 
       <section class="table-stage">
-        <div id="opponents" class="players-orbit"></div><div id="played-cards" class="played-cards"></div>
+        <div id="opponents" class="players-orbit"></div><section id="played-zone" class="played-zone hidden" aria-label="Сыгранные карты"><header class="played-heading"><span>Сыграно <b id="played-count">0</b></span><button id="played-expand" type="button" aria-label="Все сыгранные карты">Все карты ↗</button></header><div id="played-cards" class="played-cards"></div></section><button id="played-fallback" class="played-fallback hidden" type="button">Сыгранные карты</button>
         <div class="stage-caption">Карты на барахолке и легенды — справа. Наведи курсор или нажми, чтобы развернуть.</div>
       </section>
 
@@ -50,9 +50,21 @@
 <div class="gm-section"><b>РЕСУРСЫ</b><div class="gm-row"><input id="gm-amount" type="number" value="5" min="-999" max="999" style="width:88px"><button class="gm-btn" data-gm="add_power">⚡ Мощь</button><button class="gm-btn" data-gm="add_chips">◉ Чипсины</button><button class="gm-btn" data-gm="add_life">♥ Жизни</button><button class="gm-btn" data-gm="draw">🂠 Взять карты</button></div></div>
 <div class="gm-section"><b>ЖИЗНЬ И СТАТУС</b><div class="gm-row"><input id="gm-life" type="number" value="20" min="0" max="25" style="width:80px"><button class="gm-btn" data-gm="set_life">Задать HP</button><button class="gm-btn" data-gm="revive">Воскресить</button><button class="gm-btn danger" data-gm="kill">☠ Убить</button><select id="gm-killer"><option value="">— без убийцы —</option></select></div><div class="gm-row" style="margin-top:7px"><button class="gm-btn" data-gm="set_loshara" data-value="1">Сделать лошарой</button><button class="gm-btn" data-gm="set_loshara" data-value="0">Снять лошару</button><button class="gm-btn" data-gm="give_prize">🏆 Отдать главный приз</button></div></div>
 <div class="gm-section"><b>ЖЕТОНЫ ЖДК</b><div class="gm-row"><select id="gm-token"></select><button class="gm-btn" data-gm="add_token">Выдать</button><button class="gm-btn danger" data-gm="remove_token">Снять</button></div></div>
-<div class="gm-section"><b>КАРТЫ</b><div class="gm-row"><input id="gm-card-search" type="text" placeholder="поиск карты…" style="min-width:170px"><select id="gm-card"></select><select id="gm-card-dest"><option value="hand">в руку</option><option value="discard">в сброс</option><option value="deck_top">на верх колоды</option><option value="in_play">на стол (постоянка)</option></select><button class="gm-btn" data-gm="give_card">Выдать</button><button class="gm-btn danger" data-gm="remove_card">Убрать</button></div></div>
+<div class="gm-section"><b>КАРТЫ</b><div class="gm-row"><input id="gm-card-search" type="text" placeholder="Название, номер или эффект…" style="min-width:170px"><select id="gm-card"></select><select id="gm-card-dest"><option value="hand">в руку</option><option value="discard">в сброс</option><option value="deck_top">на верх колоды</option><option value="in_play">на стол (постоянка)</option></select><button class="gm-btn" data-gm="give_card">Выдать</button><button class="gm-btn danger" data-gm="remove_card">Убрать</button></div></div>
+<section id="gm-card-preview" class="gm-card-preview hidden"><button id="gm-preview-art" type="button" aria-label="Рассмотреть выбранную карту"></button><div><div id="gm-preview-type" class="gm-preview-type"></div><h3 id="gm-preview-title"></h3><p id="gm-preview-text"></p></div></section>
 <div class="gm-section"><b>СТОЛ И ПАРТИЯ</b><div class="gm-row"><button class="gm-btn" data-gm="set_turn">Передать ход</button><button class="gm-btn" data-gm="refill_market">Пересобрать барахолку</button><button class="gm-btn" data-gm="clear_pending">Разморозить окна</button><button class="gm-btn danger" data-gm="finish_game">Завершить партию</button></div><p class="gm-hint">«Разморозить окна» — если партия зависла на чужом выборе или атаке.</p></div>
 </div></div>
 <div id="gm-auth-modal" class="modal hidden"><div class="modal-card" style="width:min(420px,100%)"><button id="gm-auth-close" class="modal-close">×</button><span class="gm-badge">ДОСТУП</span><h2>Код ведущего</h2><p class="gm-hint">Лежит в файле <b>gm_token.txt</b> рядом с игрой.</p><input id="gm-auth-input" type="password" placeholder="код" autocomplete="off"><button id="gm-auth-go" class="button-primary" style="margin-top:10px;width:100%">Войти</button></div></div>
-<script src="app.js?v=76"></script>
+<div id="played-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="played-modal-title"><div class="modal-card played-gallery"><button id="played-modal-close" class="modal-close" type="button" aria-label="Закрыть">×</button><div class="eyebrow">ВЫКЛАДКА ЭТОГО ХОДА</div><h2 id="played-modal-title"></h2><div id="played-all-cards" class="played-all-cards"></div></div></div>
+<!-- v77: сообщения остаются видимыми, пока игроки делают выбор -->
+<aside id="destroy-notices" class="destroy-notices hidden" aria-label="Уничтоженные карты">
+  <div class="destroy-header"><div><span class="eyebrow">СОБЫТИЯ СТОЛА</span><h2>Уничтожения <span id="destroy-count">0</span></h2></div><button id="destroy-hide" type="button" title="Свернуть историю" aria-label="Свернуть историю">×</button></div>
+  <div id="destroy-list" class="destroy-list" role="log" aria-live="polite" aria-relevant="additions"></div>
+  <div class="destroy-footer"><p class="destroy-footnote">Нажми на карту для просмотра</p><button id="destroy-clear" type="button">Очистить</button></div>
+</aside>
+<button id="destroy-summary" type="button" class="destroy-summary hidden" aria-live="polite" title="Открыть историю уничтожений"></button>
+<div id="ui-dialog" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="ui-dialog-title" aria-describedby="ui-dialog-text">
+  <div class="modal-card ui-dialog-card"><button id="ui-dialog-close" class="modal-close" type="button" aria-label="Закрыть">×</button><div class="eyebrow">КРУТАГИДОН · РЕШЕНИЕ</div><h2 id="ui-dialog-title"></h2><p id="ui-dialog-text"></p><div class="ui-dialog-actions"><button id="ui-dialog-cancel" type="button">Отмена</button><button id="ui-dialog-confirm" type="button" class="button-primary">Подтвердить</button></div></div>
+</div>
+<script src="app.js?v=78"></script>
 </body></html>

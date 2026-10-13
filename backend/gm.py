@@ -56,9 +56,14 @@ GM_TOKEN = ensure_token()
 
 def check_token(value: Optional[str]) -> bool:
     """Сравнение в постоянном времени, чтобы токен нельзя было подобрать."""
-    if not value or not GM_TOKEN:
+    if not isinstance(value, str) or not value or len(value) > 256 or not GM_TOKEN:
         return False
-    return hmac.compare_digest(str(value).strip(), GM_TOKEN)
+    # compare_digest(str, str) падает на кириллице. Неверный код должен
+    # возвращать False, а не обрывать WebSocket и запускать цикл реконнектов.
+    try:
+        return hmac.compare_digest(value.strip().encode("utf-8"), GM_TOKEN.encode("utf-8"))
+    except UnicodeError:
+        return False
 
 
 def _clamp(value, low: int, high: int) -> int:

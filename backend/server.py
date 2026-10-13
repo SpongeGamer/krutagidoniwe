@@ -405,6 +405,12 @@ async def ws_endpoint(websocket: WebSocket, room_id: str):
 
     try:
         join_msg = await websocket.receive_json()
+        if not isinstance(join_msg, dict) or any(
+            join_msg.get(key) is not None and not isinstance(join_msg[key], str)
+            for key in ("name", "avatar", "player_id")
+        ):
+            await websocket.close(code=1008, reason="Некорректное подключение")
+            return
         name = (join_msg.get("name") or "Колдун").strip()[:40]
         avatar = (join_msg.get("avatar") or "🧙")[:4]
         saved_id = join_msg.get("player_id")
@@ -430,7 +436,14 @@ async def ws_endpoint(websocket: WebSocket, room_id: str):
             room.player_avatars[player_id] = avatar
             room.ensure_property_offer(player_id)
 
+        previous_connection = room.connections.get(player_id)
         room.connections[player_id] = websocket
+        # Старую вкладку закрываем без бесконечной борьбы двух реконнектов.
+        if previous_connection and previous_connection is not websocket:
+            try:
+                await previous_connection.close(code=4001, reason="Игра открыта в другой вкладке")
+            except Exception:
+                pass
         if room.founder_id is None:
             room.founder_id = player_id
         # Основатель вернулся — забирает хоста назад.
@@ -455,7 +468,20 @@ async def ws_endpoint(websocket: WebSocket, room_id: str):
 
         while True:
             msg = await websocket.receive_json()
-            action = msg.get("action")
+            if not isinstance(msg, dict) or not isinstance(msg.get("action"), str):
+                await websocket.send_json({"type": "error", "message": "Некорректная команда"})
+                continue
+            if "params" in msg and not isinstance(msg["params"], dict):
+                await websocket.send_json({"type": "error", "message": "Некорректные параметры команды"})
+                continue
+            action = msg["action"]
+            if action in {"play_card", "activate_attack", "activate_permanent", "buy_card"} and not isinstance(msg.get("card_id"), str):
+                await websocket.send_json({"type": "error", "message": "Не указана карта"})
+                continue
+            # Не принимаем команды от уже заменённого соединения.
+            if room.connections.get(player_id) is not websocket:
+                await websocket.close(code=4001)
+                return
 
             # Пинг от клиента: держит соединение живым через прокси.
             # CloudPub и подобные сервисы рвут WebSocket, если по нему
@@ -722,8 +748,11 @@ async def ws_endpoint(websocket: WebSocket, room_id: str):
             await room.broadcast()
 
     except WebSocketDisconnect:
-        if player_id and player_id in room.connections:
-            del room.connections[player_id]
+        # Закрытие старой вкладки не должно удалить сокет новой и поставить
+        # вернувшегося игрока на паузу.
+        if not player_id or room.connections.get(player_id) is not websocket:
+            return
+        del room.connections[player_id]
         # Игрок пропал — ставим партию на паузу и ждём его возвращения.
         if player_id and room.started and player_id in room.player_names and not room.is_bot(player_id):
             room.offline.add(player_id)
@@ -759,7 +788,8 @@ async def gm_refdata(token: str = ""):
         tokens = json.load(f)
     return {
         "cards": sorted(
-            [{"id": c.id, "name": c.name, "type": c.type} for c in ALL_CARDS.values()],
+            [{"id": c.id, "name": c.name, "type": c.type, "text": c.full_text,
+              "cost": c.cost, "power": c.power, "vp": c.vp} for c in ALL_CARDS.values()],
             key=lambda c: (c["type"], c["name"]),
         ),
         "tokens": [{"id": t["id"], "name": t.get("name", t["id"])} for t in tokens],

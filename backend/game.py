@@ -314,8 +314,8 @@ class GameState:
             "victim": victim.name if victim else "",
             "victim_id": victim.id if victim else "",
         })
-        # Держим только последние — старые уже отыграны у всех клиентов.
-        self.destroy_reel = self.destroy_reel[-6:]
+        # Ограниченная история: сохраняем серии уничтожений для всех клиентов.
+        self.destroy_reel = self.destroy_reel[-32:]
 
     def get_player(self, pid: str) -> Optional[Player]:
         return next((p for p in self.players if p.id == pid), None)
@@ -1874,7 +1874,7 @@ class GameState:
                 )
             ] if self.final_scores else None,
             # Лента сгоревших карт: клиент проигрывает анимацию по seq.
-            "destroy_reel": self.destroy_reel[-4:],
+            "destroy_reel": self.destroy_reel[:],
             # 30 строк вытеснялись цепочкой Беспределов — держим больше.
             "logs": self.logs[-100:],
         }

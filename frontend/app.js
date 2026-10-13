@@ -47,39 +47,60 @@ function copyLink(input,btn){
   else{try{document.execCommand('copy');done()}catch(e){}}
 }
 /* ---------- Подключение с авто-восстановлением ---------- */
-let reconnectTimer=null,reconnectTries=0,wantConnection=false,keepAliveTimer=null;
+let reconnectTimer=null,reconnectTries=0,wantConnection=false,keepAliveTimer=null,hasJoined=false;
+const MAX_RECONNECT_TRIES=8;
+let connectionName='Колдун';
 function connect(name){
+  connectionName=name;
+  if(ws&&(ws.readyState===WebSocket.OPEN||ws.readyState===WebSocket.CONNECTING))return;
+  clearTimeout(reconnectTimer);
   const saved=localStorage.getItem('krutagidon_pid_'+roomId);
-  ws=new WebSocket(wsUrl(roomId));
-  ws.onopen=()=>{
-    reconnectTries=0;setLinkState(true);
-    ws.send(JSON.stringify({name,avatar:chosenAvatar,player_id:saved||undefined}));
-    // Туннели (CloudPub и др.) рвут «молчащее» соединение — шлём пинг.
+  const socket=new WebSocket(wsUrl(roomId));ws=socket;
+  hasJoined=false;freshConnection=true;
+  socket.onopen=()=>{
+    if(ws!==socket)return;
+    socket.send(JSON.stringify({name,avatar:chosenAvatar,player_id:saved||undefined}));
     clearInterval(keepAliveTimer);
     keepAliveTimer=setInterval(()=>{
-      if(ws&&ws.readyState===1){try{ws.send(JSON.stringify({action:'ping'}))}catch(e){}}
+      if(ws===socket&&socket.readyState===WebSocket.OPEN)socket.send(JSON.stringify({action:'ping'}));
     },20000);
-    // Сессия ведущего переживает переподключение: код лежит локально,
-    // сервер подтверждает его заново.
-    if(gmToken){gmSilentAuth=true;ws.send(JSON.stringify({action:'gm_auth',gm_token:gmToken}));}
   };
-  ws.onmessage=e=>handleMessage(JSON.parse(e.data));
-  ws.onclose=()=>{
-    clearInterval(keepAliveTimer);
-    setLinkState(false);
-    if(!wantConnection){$('join-btn').disabled=false;$('join-btn').textContent='Играть';return}
-    // Связь оборвалась — молча пробуем вернуться, партия ждёт на паузе.
+  socket.onmessage=event=>{
+    if(ws!==socket)return;
+    try{handleMessage(JSON.parse(event.data));}
+    catch(error){console.error('Обработка сообщения игры:',error);gmToast('Ошибка интерфейса. Подробности в консоли.',true);}
+  };
+  socket.onclose=event=>{
+    if(ws!==socket)return;
+    hasJoined=false;clearInterval(keepAliveTimer);setLinkState(false);
+    // Один неудачный запрос GM не должен повторяться при каждом реконнекте.
+    if(gmAuthPending){resetGmSession();gmToast('Проверка кода ведущего прервалась. Введи код заново.',true);}
+    if(event.code===4001){
+      wantConnection=false;
+      $('link-state').textContent='Игра открыта в другой вкладке.';
+      $('reconnect-btn').classList.remove('hidden');
+      return;
+    }
+    if(!wantConnection){$('join-btn').disabled=false;$('join-btn').textContent='Играть';return;}
     reconnectTries++;
-    const delay=Math.min(1000*reconnectTries,5000);
-    clearTimeout(reconnectTimer);
-    reconnectTimer=setTimeout(()=>connect(name),delay);
+    if(reconnectTries>MAX_RECONNECT_TRIES){
+      wantConnection=false;
+      $('link-state').textContent='Не удалось восстановить связь.';
+      $('reconnect-btn').classList.remove('hidden');
+      return;
+    }
+    const delay=Math.min(1000*reconnectTries,8000);
+    reconnectTimer=setTimeout(()=>{if(wantConnection&&ws===socket)connect(name);},delay);
   };
 }
+$('reconnect-btn').onclick=()=>{wantConnection=true;reconnectTries=0;$('reconnect-btn').classList.add('hidden');connect(connectionName);};
+
 function setLinkState(online){
   const b=document.getElementById('link-state');
   if(!b)return;
   b.textContent=online?'':'нет связи — восстанавливаем…';
   b.classList.toggle('hidden',online);
+  if(online)$('reconnect-btn').classList.add('hidden');
 }
 $("join-btn").onclick=()=>{
   const name=$("name-input").value.trim()||'Колдун';
@@ -92,6 +113,8 @@ $("join-btn").onclick=()=>{
 $("name-input")?.addEventListener('keydown',e=>{if(e.key==='Enter')$('join-btn').click()});
 function handleMessage(msg){if(msg.type==='pong'){return}
   if(msg.type==='gm_auth'){
+    if(!gmAuthPending)return; // запоздалый ответ после таймаута не меняет доступ
+    gmAuthPending=false;clearTimeout(gmAuthTimer);$('gm-auth-go').disabled=false;
     if(msg.ok){
       const wasSilent=gmSilentAuth;gmSilentAuth=false;
       gmUnlocked=true;localStorage.setItem('krutagidon_gm',gmToken);
@@ -100,12 +123,14 @@ function handleMessage(msg){if(msg.type==='pong'){return}
       if(!wasSilent){gmToast('Режим ведущего включён');gmOpen()}
     }else{
       const wasSilent=gmSilentAuth;gmSilentAuth=false;
-      gmUnlocked=false;gmToken='';localStorage.removeItem('krutagidon_gm');
+      resetGmSession();
       if(!wasSilent)gmToast('Неверный код',true);
     }
     return;
   }
-  if(msg.type==='gm_ok'){gmToast(msg.message||'Готово');return}if(msg.type==='to_lobby'){returnToLobby();return}if(msg.type==='kicked'){handleKicked(msg);return}if(msg.type==='joined'){myId=msg.player_id;localStorage.setItem('krutagidon_pid_'+roomId,myId);$('lobby-room-code').textContent=roomId;$('room-code-game').textContent=roomId;const l=$('lobby-link');if(l)l.value=inviteUrl(roomId);if(!msg.returning)show('lobby-screen')}else if(msg.type==='lobby'){renderLobby(msg);if(msg.started)show('game-screen')}else if(msg.type==='state'){
+  if(msg.type==='gm_ok'){gmToast(msg.message||'Готово');return}if(msg.type==='to_lobby'){returnToLobby();return}if(msg.type==='kicked'){handleKicked(msg);return}if(msg.type==='joined'){myId=msg.player_id;hasJoined=true;reconnectTries=0;setLinkState(true);
+    if(gmToken)gmAuth(gmToken,true);
+    localStorage.setItem('krutagidon_pid_'+roomId,myId);$('lobby-room-code').textContent=roomId;$('room-code-game').textContent=roomId;const l=$('lobby-link');if(l)l.value=inviteUrl(roomId);if(!msg.returning)show('lobby-screen')}else if(msg.type==='lobby'){renderLobby(msg);if(msg.started)show('game-screen')}else if(msg.type==='state'){
     /* #18: первый state после перезахода — это «снимок» уже случившегося.
        Прокручивать всю историю анимаций и тостов не нужно: просто
        синхронизируем счётчики и рисуем актуальный стол. */
@@ -113,13 +138,13 @@ function handleMessage(msg){if(msg.type==='pong'){return}
       freshConnection=false;
       lastVisualSequence=msg.state.visual_event?.seq||0;
       lastToastSequence=lastVisualSequence;
-      lastDestroySeq=msg.state.destroy_reel?.seq||0;
+      lastDestroySeq=Math.max(0,...(msg.state.destroy_reel||[]).map(item=>item.seq||0));
       lastTurnPlayer=msg.state.turn_player_id;
       logSeenCount=(msg.state.logs||[]).length;
       lastState=msg.state;show('game-screen');render(msg.state);
       return;
     }
-    const motion=captureVisualMotion(msg.state.visual_event);lastState=msg.state;show('game-screen');render(msg.state);if(gmUnlocked&&!$('gm-modal').classList.contains('hidden'))gmRefreshPlayers();prepareVisualMotion(motion);requestAnimationFrame(()=>playVisualMotion(motion,msg.state.visual_event))}else if(msg.type==='error'){playSound('error');alert(msg.message)}}
+    const motion=captureVisualMotion(msg.state.visual_event);lastState=msg.state;show('game-screen');render(msg.state);if(gmUnlocked&&!$('gm-modal').classList.contains('hidden'))gmRefreshPlayers();prepareVisualMotion(motion);requestAnimationFrame(()=>playVisualMotion(motion,msg.state.visual_event))}else if(msg.type==='error'){playSound('error');gameNotice(msg.message||'Не удалось выполнить действие','Действие не выполнено')}}
 function show(id){['join-screen','lobby-screen','game-screen'].forEach(s=>$(s).classList.toggle('hidden',s!==id))}
 /* Хост убрал игрока из комнаты: не переподключаемся молча (v74) */
 function handleKicked(msg){
@@ -128,7 +153,9 @@ function handleKicked(msg){
   localStorage.removeItem('krutagidon_pid_'+roomId);
   try{ws&&ws.close()}catch(e){}
   playSound('error');
-  alert(msg.message||'Хост убрал тебя из комнаты');
+  document.querySelectorAll('.modal').forEach(modal=>modal.classList.add('hidden'));
+  destroyNotices=[];destroyManualOpen=false;clearTimeout(destroySummaryTimer);renderDestroyNotices();
+  gameNotice(msg.message||'Хост убрал тебя из комнаты','Ты покинул комнату');
   show('join-screen');
   const btn=$('join-btn');
   if(btn){btn.disabled=false;btn.textContent='Играть'}
@@ -137,13 +164,13 @@ function handleKicked(msg){
 function returnToLobby(){
   ['gameover-modal','event-modal','decision-modal','target-modal','attack-modal',
    'wild-modal','tokens-modal','card-modal','confirm-act-modal','confirm-fam-modal',
-   'pay-modal','pause-overlay','burn-layer'].forEach(id=>{
+   'pay-modal','pause-overlay','played-modal'].forEach(id=>{
     const el=$(id);if(el)el.classList.add('hidden');
   });
   // Сбрасываем состояние партии, иначе новая начнётся с чужими данными.
   announcedGameOver=false;lastState=null;lastTurnPlayer=null;
   lastToastSequence=0;lastVisualSequence=0;lastBurstKey='';
-  lastDestroySeq=0;burnQueue=[];burnBusy=false;
+  lastDestroySeq=0;destroyNotices=[];destroyManualOpen=false;clearTimeout(destroySummaryTimer);renderDestroyNotices();closeGameDialog(false);
   deferredAttackMode=false;wildTargetMode=false;
   pendingTargetCard=null;pendingAttackChoice=null;permanentActivationCard=null;
   show('lobby-screen');
@@ -165,8 +192,9 @@ function renderLobbyPlayers(msg){
       btn.className='lp-kick';btn.type='button';
       btn.title=`Убрать ${p.name} из комнаты`;
       btn.textContent='✕';
-      btn.onclick=()=>{
-        if(!confirm(`Убрать ${p.name} из комнаты?`))return;
+      btn.onclick=async()=>{
+        if(!await gameConfirm({title:'Убрать игрока?',text:`${p.name} покинет эту комнату.`,confirmLabel:'Убрать игрока',danger:true}))return;
+        if(!ws||ws.readyState!==1)return;
         playSound('click');
         ws.send(JSON.stringify({action:'kick_player',player_id:p.id}));
       };
@@ -217,13 +245,14 @@ function sendRoomSettings(){ws.send(JSON.stringify({action:'configure_room',zhdk
   btn.disabled=true;
   playSound('drawer');
   ws.send(JSON.stringify({action:'resolve_event'}));
-};$('sound-toggle').textContent=soundOn?'🔊':'🔇';$('sound-toggle').onclick=()=>{soundOn=!soundOn;localStorage.setItem('krutagidon_sound',soundOn?'on':'off');$('sound-toggle').textContent=soundOn?'🔊':'🔇';if(soundOn)playSound('click')};$('add-bot-btn').onclick=()=>{playSound('click');ws.send(JSON.stringify({action:'add_bot'}))};$('start-btn').onclick=()=>{playSound('click');ws.send(JSON.stringify({action:'start_game'}));};$('end-turn-btn').onclick=()=>{
+};$('sound-toggle').textContent=soundOn?'🔊':'🔇';$('sound-toggle').onclick=()=>{soundOn=!soundOn;localStorage.setItem('krutagidon_sound',soundOn?'on':'off');$('sound-toggle').textContent=soundOn?'🔊':'🔇';if(soundOn)playSound('click')};$('add-bot-btn').onclick=()=>{playSound('click');ws.send(JSON.stringify({action:'add_bot'}))};$('start-btn').onclick=()=>{playSound('click');ws.send(JSON.stringify({action:'start_game'}));};$('end-turn-btn').onclick=async()=>{
   /* #2: мощь сгорает в конце хода — предупреждаем, пока её не потратили.
      Порог 2, а не 0 (правка Егора): почти все карты стоят от 3, поэтому
      напоминание про 1-2 мощи чаще всего бесполезно и только раздражает. */
   const meNow=lastState&&lastState.players.find(p=>p.id===myId);
   const left=meNow?meNow.power_available:0;
-  if(left>2&&!confirm(`У тебя осталось ${left} мощи — она сгорит. Точно закончить ход?`))return;
+  if(left>2&&!await gameConfirm({title:'Закончить ход?',text:`Осталось ${left} мощи. Неиспользованная мощь сгорит, а ход перейдёт следующему игроку.`,confirmLabel:'Закончить ход'}))return;
+  if(!ws||ws.readyState!==1||lastState?.turn_player_id!==myId||lastState?.pause?.paused||lastState?.pending_event||lastState?.pending_decision)return;
   ws.send(JSON.stringify({action:'end_turn'}));
 };$('buy-wild-btn').onclick=()=>ws.send(JSON.stringify({action:'buy_wild_magic'}));$('buy-familiar-btn').onclick=()=>{
   const me=lastState?.players.find(p=>p.id===myId);
@@ -258,15 +287,16 @@ document.addEventListener('click',event=>{
   const card=event.target.closest?.('.modal-card');
   if(card){event.stopPropagation();return}
   // Окна, требующие явного решения, по фону не закрываем.
-  if(['decision-modal','event-modal','gameover-modal','pause-overlay'].includes(modal.id))return;
+  if(['decision-modal','event-modal','gameover-modal','pause-overlay','ui-dialog'].includes(modal.id))return;
   modal.classList.add('hidden');
   if(modal.id==='target-modal')closeTargetModal();
 });
 /* Esc закрывает верхнее необязательное окно. */
 document.addEventListener('keydown',event=>{
   if(event.key!=='Escape')return;
+  if(!$('ui-dialog').classList.contains('hidden'))return;
   const open=[...document.querySelectorAll('.modal:not(.hidden)')]
-    .filter(m=>!['decision-modal','event-modal','gameover-modal','pause-overlay'].includes(m.id));
+    .filter(m=>!['decision-modal','event-modal','gameover-modal','pause-overlay','ui-dialog'].includes(m.id));
   const top=open[open.length-1];
   if(!top)return;
   top.classList.add('hidden');
@@ -345,7 +375,7 @@ function playVisualMotion(motion,event){
   }
 }
 /* ---------- Счётчики стопок и диагностика (v43) ---------- */
-const BUILD_TAG='v74';
+const BUILD_TAG='v78';
 function setPileCounts(me){
   const d=$('self-deck-count'),c=$('self-discard-count');
   if(d)d.textContent=(me&&Number.isFinite(me.deck_count))?me.deck_count:0;
@@ -605,120 +635,101 @@ function cardNeedsTarget(card){
   if(/кажд(ый|ому|ого) (колдун|враг)/.test(t))return false;   // бьёт по всем
   return /выбранн|выбери|левому|правому|левого|правого/.test(t);
 }
-/* ---------- СОЖЖЕНИЕ КАРТЫ (v73) ----------
-   Уничтоженную карту показываем ВСЕМ: крупная картинка, название, текст,
-   кто её потерял и почему. Карта обугливается и осыпается пеплом.
-   Очередь: несколько уничтожений подряд проигрываются по одному. */
-let lastDestroySeq=0,burnQueue=[],burnBusy=false;
+/* ---------- v77: уничтожения не перекрывают обязательный выбор ----------
+   Лента хранит последние 12 событий до явного закрытия. Новые записи сверху;
+   seq защищает от дублей при повторной рассылке состояния. */
+let lastDestroySeq=0,destroyNotices=[],destroyManualOpen=false,destroySummaryTimer=null;
 function renderDestroyReel(reel){
-  if(!Array.isArray(reel)||!reel.length)return;
-  const fresh=reel.filter(d=>d&&d.seq>lastDestroySeq);
+  if(!Array.isArray(reel))return;
+  const fresh=reel.filter(item=>item&&item.seq>lastDestroySeq).sort((a,b)=>a.seq-b.seq);
   if(!fresh.length)return;
-  lastDestroySeq=Math.max(...reel.map(d=>d.seq||0));
-  fresh.forEach(d=>burnQueue.push(d));
-  pumpBurnQueue();
+  lastDestroySeq=Math.max(lastDestroySeq,...fresh.map(item=>item.seq));
+  const latest=fresh[fresh.length-1];
+  destroyNotices=[...fresh.reverse(),...destroyNotices].slice(0,12);
+  renderDestroyNotices();
+  const summary=$('destroy-summary');
+  summary.textContent=fresh.length>1?`Уничтожено карт: ${fresh.length}. Последняя — «${latest.name}».`:`${latest.victim||'На столе'}: уничтожена «${latest.name}».`;
+  summary.classList.toggle('hidden',Boolean(lastState?.pending_decision||lastState?.pending_event||destroyManualOpen));
+  clearTimeout(destroySummaryTimer);
+  destroySummaryTimer=setTimeout(()=>summary.classList.add('hidden'),6000);
 }
-function pumpBurnQueue(){
-  if(burnBusy||!burnQueue.length)return;
-  burnBusy=true;
-  playBurnCard(burnQueue.shift(),()=>{burnBusy=false;pumpBurnQueue()});
+function renderDestroyNotices(){
+  const rail=$('destroy-notices');
+  if(!rail)return;
+  syncDestroyVisibility();
+  $('destroy-count').textContent=String(destroyNotices.length);
+  $('destroy-list').replaceChildren(...destroyNotices.map(info=>{
+    const item=document.createElement('article');item.className='destroy-notice';
+    item.innerHTML=`<button type="button" class="destroy-thumb" aria-label="Рассмотреть уничтоженную карту"><img alt=""></button><div class="destroy-copy"><div class="destroy-who"></div><b class="destroy-name"></b><p class="destroy-reason"></p></div><button type="button" class="destroy-dismiss" aria-label="Скрыть уведомление">×</button>`;
+    item.querySelector('.destroy-who').textContent=info.victim?`${info.victim} · уничтожение`:'Карта уничтожена';
+    item.querySelector('.destroy-name').textContent=info.name||'Карта';
+    item.querySelector('.destroy-reason').textContent=info.reason||info.type||'';
+    const image=item.querySelector('img');image.alt=info.name||'Карта';
+    attachCardImage(image,info.card_id,()=>{image.remove();item.querySelector('.destroy-thumb').textContent='✦';});
+    item.querySelector('.destroy-thumb').title='Рассмотреть карту';
+    item.querySelector('.destroy-thumb').onclick=()=>showCard({id:info.card_id,name:info.name,type:info.type,text:info.text});
+    item.querySelector('.destroy-dismiss').onclick=()=>{destroyNotices=destroyNotices.filter(entry=>entry.seq!==info.seq);renderDestroyNotices();};
+    return item;
+  }));
+  $('destroy-list').scrollTop=0;
 }
-function playBurnCard(info,done){
-  const layer=$('burn-layer');
-  if(!layer){done();return}
-  const COLS=4,ROWS=6;                    // на сколько кусков ломаем карту
-  layer.innerHTML=`
-    <div class="burn-stage">
-      <div class="burn-eyebrow">КАРТА УНИЧТОЖЕНА</div>
-      <div class="burn-card">
-        <div class="burn-whole"><img alt=""></div>
-        <div class="burn-shards"></div>
-        <div class="burn-flash"></div>
-      </div>
-      <div class="burn-copy">
-        <div class="burn-name">${escapeHtml(info.name||'Карта')}</div>
-        <div class="burn-type">${escapeHtml(info.type||'')}</div>
-        <div class="burn-text">${escapeHtml((info.text||'').slice(0,190))}</div>
-        <div class="burn-reason">${escapeHtml(info.reason||'')}</div>
-      </div>
-    </div>`;
-  const whole=layer.querySelector('.burn-whole');
-  const img=whole.querySelector('img');
-  let srcUsed=null;
-  attachCardImage(img,info.card_id,()=>{
-    // Картинки нет — ломаем текстовую карточку, эффект тот же.
-    whole.innerHTML=`<div class="burn-fallback"><b>${escapeHtml(info.name||'')}</b><small>${escapeHtml((info.text||'').slice(0,110))}</small></div>`;
+function syncDestroyVisibility(){
+  const hasHistory=destroyNotices.length>0;
+  const pending=Boolean(lastState?.pending_decision||lastState?.pending_event);
+  const expanded=hasHistory&&(pending||destroyManualOpen);
+  document.body.classList.toggle('has-destroy-notices',expanded);
+  $('destroy-notices').classList.toggle('hidden',!expanded);
+  $('destroy-history-button').classList.toggle('hidden',!hasHistory);
+  $('destroy-history-button').textContent=`Уничтожения · ${destroyNotices.length}`;
+  $('destroy-history-button').setAttribute('aria-expanded',String(expanded));
+  if(expanded||!hasHistory)$('destroy-summary').classList.add('hidden');
+}
+$('destroy-clear').onclick=()=>{destroyNotices=[];destroyManualOpen=false;renderDestroyNotices();};
+$('destroy-hide').onclick=()=>{destroyManualOpen=false;$('destroy-notices').classList.add('hidden');document.body.classList.remove('has-destroy-notices');$('destroy-history-button').setAttribute('aria-expanded','false');};
+$('destroy-history-button').onclick=()=>{destroyManualOpen=$('destroy-notices').classList.contains('hidden');syncDestroyVisibility();};
+$('destroy-summary').onclick=()=>{destroyManualOpen=true;syncDestroyVisibility();};
+
+/* ---------- Диалоги игры вместо confirm()/alert() ---------- */
+let activeGameDialog=null;
+function gameConfirm({title,text,confirmLabel='Подтвердить',danger=false,notice=false}){
+  // Повторное нажатие не открывает второй диалог и не отправляет две команды.
+  if(activeGameDialog)return Promise.resolve(false);
+  return new Promise(resolve=>{
+    const modal=$('ui-dialog');
+    activeGameDialog={resolve,previousFocus:document.activeElement};
+    $('ui-dialog-title').textContent=title;
+    $('ui-dialog-text').textContent=text;
+    $('ui-dialog-confirm').textContent=confirmLabel;
+    $('ui-dialog-confirm').classList.toggle('is-danger',danger);
+    $('ui-dialog-cancel').classList.toggle('hidden',notice);
+    modal.classList.remove('hidden');
+    (notice?$('ui-dialog-confirm'):$('ui-dialog-cancel')).focus();
   });
-
-  layer.classList.remove('hidden');
-  void layer.offsetWidth;
-  layer.classList.add('run');
-  playSound('error');
-
-  // Осколки строим, когда известен реальный размер карты.
-  const buildShards=()=>{
-    const box=layer.querySelector('.burn-card');
-    const shards=layer.querySelector('.burn-shards');
-    if(!box||!shards)return;
-    const W=box.clientWidth,H=box.clientHeight;
-    if(!W||!H)return;
-    srcUsed=img&&img.getAttribute('src');
-    const tileW=W/COLS,tileH=H/ROWS;
-    const frag=document.createDocumentFragment();
-    for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
-      const sh=document.createElement('div');
-      sh.className='shard';
-      sh.style.left=`${c*tileW}px`;   sh.style.top=`${r*tileH}px`;
-      sh.style.width=`${tileW}px`;    sh.style.height=`${tileH}px`;
-      // Кусок картинки: та же картинка, сдвинутая так, чтобы попал нужный фрагмент.
-      if(srcUsed){
-        const im=document.createElement('img');
-        im.src=srcUsed;
-        im.style.width=`${W}px`;im.style.height=`${H}px`;
-        im.style.left=`${-c*tileW}px`;im.style.top=`${-r*tileH}px`;
-        sh.appendChild(im);
-      }else{
-        sh.style.background='linear-gradient(150deg,#4a2a52,#20122a)';
-        sh.style.boxShadow='inset 0 0 0 1px #e0a94f55';
-      }
-      // Рваный край: слегка «покусанный» четырёхугольник вместо ровного квадрата.
-      const j=()=>(Math.random()*16).toFixed(1);
-      sh.style.setProperty('--clip',
-        `${j()}% ${j()}%, ${100-j()}% ${j()}%, ${100-j()}% ${100-j()}%, ${j()}% ${100-j()}%`);
-      // Разлёт: от центра карты наружу + случайный доворот.
-      const cx=(c+0.5)/COLS-0.5, cy=(r+0.5)/ROWS-0.5;
-      const push=170+Math.random()*190;
-      sh.style.setProperty('--tx',`${(cx*push*2.1+(Math.random()*40-20)).toFixed(0)}px`);
-      sh.style.setProperty('--ty',`${(cy*push*1.5+90+Math.random()*70).toFixed(0)}px`);
-      sh.style.setProperty('--rot',`${(Math.random()*150-75).toFixed(0)}deg`);
-      sh.style.setProperty('--sc',(0.45+Math.random()*0.3).toFixed(2));
-      sh.style.setProperty('--ang',`${Math.floor(Math.random()*360)}deg`);
-      sh.style.setProperty('--dur',`${(1.25+Math.random()*0.55).toFixed(2)}s`);
-      // Куски снизу срываются первыми — карта «оседает».
-      sh.style.setProperty('--delay',`${(1.16+(ROWS-1-r)*0.035+Math.random()*0.07).toFixed(2)}s`);
-      frag.appendChild(sh);
-    }
-    shards.appendChild(frag);
-  };
-  // Ждём загрузку картинки, но не дольше 600 мс — эффект важнее.
-  if(img&&!img.complete){
-    let built=false;
-    const once=()=>{if(built)return;built=true;buildShards()};
-    img.addEventListener('load',once,{once:true});
-    img.addEventListener('error',()=>setTimeout(once,60),{once:true});
-    setTimeout(once,600);
-  }else{
-    requestAnimationFrame(buildShards);
-  }
-
-  clearTimeout(playBurnCard._t);
-  playBurnCard._t=setTimeout(()=>{
-    layer.classList.remove('run');
-    layer.classList.add('hidden');
-    layer.innerHTML='';
-    done();
-  },3400);
 }
+function gameNotice(text,title='Внимание'){
+  if(activeGameDialog)closeGameDialog(false);
+  return gameConfirm({title,text,confirmLabel:'Понятно',notice:true});
+}
+function closeGameDialog(accepted){
+  if(!activeGameDialog)return;
+  const current=activeGameDialog;activeGameDialog=null;
+  $('ui-dialog').classList.add('hidden');
+  if(current.previousFocus?.isConnected)current.previousFocus.focus();
+  current.resolve(accepted);
+}
+$('ui-dialog-confirm').onclick=()=>closeGameDialog(true);
+$('ui-dialog-cancel').onclick=()=>closeGameDialog(false);
+$('ui-dialog-close').onclick=()=>closeGameDialog(false);
+$('ui-dialog').onclick=event=>{if(event.target===$('ui-dialog'))closeGameDialog(false);};
+document.addEventListener('keydown',event=>{
+  if(!activeGameDialog)return;
+  if(event.key==='Escape'){event.preventDefault();event.stopImmediatePropagation();closeGameDialog(false);return;}
+  if(event.key!=='Tab')return;
+  const buttons=[...$('ui-dialog').querySelectorAll('button')].filter(button=>!button.classList.contains('hidden')&&!button.disabled);
+  const first=buttons[0],last=buttons[buttons.length-1];
+  if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}
+  else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
+},true);
 /* Щит над игроком, когда он отбил атаку — v70 */
 function showDefendFx(event){
   const card=event.cards&&event.cards[0];
@@ -768,11 +779,11 @@ function askPayment(card,onPay){
   // «Эпичный мерч боевых магов»: −2 к цене легенд в этом ходу.
   if(isLegend)cost=Math.max(0,cost-(me.legend_discount||0));
   if(!isLegend){
-    if(cost>power){alert('За эту карту чипсинами платить нельзя — не хватает мощи');return}
+    if(cost>power){gameNotice('За эту карту чипсинами платить нельзя — не хватает мощи.','Не удалось купить');return}
     onPay(0);return;
   }
   const minChips=Math.max(0,cost-power);
-  if(minChips>chips){alert('Не хватает мощи и чипсин');return}
+  if(minChips>chips){gameNotice('Не хватает мощи и чипсин.','Не удалось купить');return}
   const maxChips=Math.min(chips,cost);
   // Даже когда мощи хватает, игрок может доплатить чипсинами и сберечь
   // мощь на вторую покупку — это тактика, отбирать её нельзя.
@@ -837,7 +848,90 @@ function playerEl(p,isMe,isTurn,seat){
   if(zh&&p.death_tokens)zh.onclick=(event)=>{event.stopPropagation();showTokens(p)};
   return el;
 }
-function render(state){const me=state.players.find(p=>p.id===myId),active=state.players.find(p=>p.id===state.turn_player_id),myTurn=state.turn_player_id===myId;/* СЧЁТЧИКИ КОЛОДЫ/СБРОСА — В САМОМ НАЧАЛЕ. Никакая ошибка ниже не должна их обнулять. */setPileCounts(me);try{if(lastTurnPlayer&&lastTurnPlayer!==state.turn_player_id)playSound('turn');lastTurnPlayer=state.turn_player_id;renderVisualEvent(state.visual_event);renderDestroyReel(state.destroy_reel);renderEvent(state.pending_event);renderDecision(state.pending_decision);renderWaitingBanner(state);trackLog(state);$('turn-banner').textContent=active?(myTurn?'Твой ход — наводи Крутагидон':`Ходит ${active.name}`):'Подготовка';$('log-panel').innerHTML=state.logs.map(l=>`<div>${escapeHtml(l)}</div>`).join('');$('log-panel').scrollTop=$('log-panel').scrollHeight;const seatedPlayers=[...(me?[me]:[]),...state.players.filter(p=>p.id!==myId)];const seatLayouts={1:[0],2:[0,1],3:[0,2,3],4:[0,4,1,5],5:[0,4,2,3,5]};const seats=seatLayouts[seatedPlayers.length]||seatLayouts[5];$('opponents').replaceChildren(...seatedPlayers.map((p,index)=>playerEl(p,p.id===myId,p.id===state.turn_player_id,seats[index])));$('played-cards').replaceChildren(...(active?.played_this_turn||[]).map(c=>cardEl(c,null)));$('main-deck-count').textContent=state.main_deck_count;$('legend-deck-count').textContent=state.legend_deck_count;$('vyal-count').textContent=state.vyal_remaining;$('zhdk-count').textContent=state.undead_stack_count;$('chips-bank-count').textContent=state.chips_bank;$('market').replaceChildren(...state.market.map(c=>cardEl(c,()=>myTurn&&buyCard(c.id))));$('legend-market').replaceChildren(...state.legend_market.map(c=>cardEl(c,()=>myTurn&&buyCard(c.id))));$('buy-wild-btn').disabled=!myTurn;const famBtn=$('buy-familiar-btn');const famLeft=(me?.familiars||[]).filter(f=>!(me?.bought_familiars||[]).includes(f.id));famBtn.disabled=!myTurn||!me||famLeft.length===0;
+/* v78: выкладка занимает свободную область между планшетами колдунов.
+   Карты не исчезают: если всё не помещается при размере >=78px — прокрутка. */
+let playedLayoutFrame=0;
+function schedulePlayedLayout(){
+  cancelAnimationFrame(playedLayoutFrame);playedLayoutFrame=requestAnimationFrame(layoutPlayedCards);
+}
+function findPlayedRectangle(stage){
+  const bounds=stage.getBoundingClientRect(),gap=16;
+  const seats=[...stage.querySelectorAll('.player-seat')];
+  stage.classList.toggle('compact-seats',bounds.width<800&&seats.length>=3);
+  // Планшеты не могут выходить за края сукна и попадать на кнопки рынков.
+  seats.forEach(seat=>{
+    seat.style.left='';
+    const pieces=[seat,...seat.querySelectorAll('.player-core,.property-plate,.seat-power,.player-prize')].map(part=>part.getBoundingClientRect());
+    const left=Math.min(...pieces.map(p=>p.left)),right=Math.max(...pieces.map(p=>p.right));
+    const shift=left<bounds.left+12?bounds.left+12-left:(right>bounds.right-12?bounds.right-12-right:0);
+    if(shift)seat.style.left=`${parseFloat(getComputedStyle(seat).left)+shift}px`;
+  });
+  const limit={left:18,top:20,right:bounds.width-18,bottom:bounds.height-34};
+  const obstacles=[...stage.querySelectorAll('.player-seat')].map(seat=>{
+    const parts=[seat,...seat.querySelectorAll('.player-core,.property-plate,.seat-power,.player-prize')].map(part=>part.getBoundingClientRect());
+    return {left:Math.max(limit.left,Math.min(...parts.map(p=>p.left))-bounds.left-gap),
+      right:Math.min(limit.right,Math.max(...parts.map(p=>p.right))-bounds.left+gap),
+      top:Math.max(limit.top,Math.min(...parts.map(p=>p.top))-bounds.top-gap),
+      bottom:Math.min(limit.bottom,Math.max(...parts.map(p=>p.bottom))-bounds.top+gap)};
+  });
+  const xs=[...new Set([limit.left,limit.right,...obstacles.flatMap(o=>[o.left,o.right])])].sort((a,b)=>a-b);
+  const ys=[...new Set([limit.top,limit.bottom,...obstacles.flatMap(o=>[o.top,o.bottom])])].sort((a,b)=>a-b);
+  let best=null,bestScore=-1;
+  for(let i=0;i<xs.length;i++)for(let j=i+1;j<xs.length;j++)
+    for(let k=0;k<ys.length;k++)for(let l=k+1;l<ys.length;l++){
+      const rect={left:xs[i],right:xs[j],top:ys[k],bottom:ys[l]};
+      const w=rect.right-rect.left,h=rect.bottom-rect.top;
+      if(w<114||h<150||obstacles.some(o=>rect.left<o.right&&rect.right>o.left&&rect.top<o.bottom&&rect.bottom>o.top))continue;
+      const central=rect.left<=bounds.width/2&&rect.right>=bounds.width/2&&rect.top<=bounds.height/2&&rect.bottom>=bounds.height/2;
+      const score=w*h*(central?2:1);
+      if(score>bestScore){best=rect;bestScore=score;}
+    }
+  return best;
+}
+function layoutPlayedCards(){
+  const stage=document.querySelector('.table-stage'),zone=$('played-zone'),cards=$('played-cards');
+  if(!stage||!zone||!stage.clientWidth)return;
+  const count=cards.children.length;zone.classList.toggle('hidden',count===0);
+  const rect=findPlayedRectangle(stage);
+  if(!count){$('played-fallback').classList.add('hidden');return;}
+  if(!rect){zone.classList.add('hidden');$('played-fallback').classList.remove('hidden');$('played-fallback').textContent=`Сыграно карт: ${count} · посмотреть`;return;}
+  $('played-fallback').classList.add('hidden');
+  const width=Math.floor(rect.right-rect.left),height=Math.floor(rect.bottom-rect.top);
+  Object.assign(zone.style,{left:`${rect.left}px`,top:`${rect.top}px`,width:`${width}px`,height:`${height}px`});
+  $('played-count').textContent=String(count);
+  zone.classList.toggle('is-narrow',width<240);$('played-expand').textContent=width<240?'↗':'Все карты ↗';
+  const availableWidth=width-20,availableHeight=height-64,gap=8;
+  if(availableHeight<114){zone.classList.add('hidden');$('played-fallback').classList.remove('hidden');$('played-fallback').textContent=`Сыграно карт: ${count} · посмотреть`;return;}
+  let plan=null;
+  for(let cols=1;cols<=Math.min(count,Math.floor((availableWidth+gap)/86));cols++){
+    const cardWidth=Math.min(118,Math.floor((availableWidth-gap*(cols-1))/cols));
+    const rows=Math.ceil(count/cols),cardHeight=cardWidth*1000/708;
+    if(cardWidth>=78&&rows*cardHeight+(rows-1)*gap<=availableHeight&&(!plan||cardWidth>plan.width))plan={cols,width:cardWidth};
+  }
+  if(!plan){
+    const targetWidth=Math.max(78,Math.min(104,Math.floor((availableHeight-4)*708/1000)));
+    const cols=Math.max(1,Math.floor((availableWidth+gap)/(targetWidth+gap)));
+    plan={cols,width:Math.min(targetWidth,Math.floor((availableWidth-gap*(cols-1))/cols))};
+  }
+  cards.style.setProperty('--played-width',`${plan.width}px`);
+  cards.style.gridTemplateColumns=`repeat(${plan.cols},${plan.width}px)`;
+  zone.classList.toggle('is-scrollable',!plan||Math.ceil(count/plan.cols)*(plan.width*1000/708+gap)-gap>availableHeight);
+}
+function showPlayedCards(){
+  const active=lastState?.players.find(player=>player.id===lastState.turn_player_id);
+  if(!active)return;
+  $('played-modal-title').textContent=`${active.name} · сыграно ${active.played_this_turn.length}`;
+  $('played-all-cards').replaceChildren(...active.played_this_turn.map(card=>cardEl(card,null)));
+  $('played-modal').classList.remove('hidden');
+}
+$('played-expand').onclick=showPlayedCards;$('played-fallback').onclick=showPlayedCards;
+$('played-modal-close').onclick=()=>$('played-modal').classList.add('hidden');
+window.addEventListener('resize',schedulePlayedLayout);
+new ResizeObserver(schedulePlayedLayout).observe(document.querySelector('.table-stage'));
+document.fonts?.ready.then(schedulePlayedLayout);
+
+function render(state){const me=state.players.find(p=>p.id===myId),active=state.players.find(p=>p.id===state.turn_player_id),myTurn=state.turn_player_id===myId;/* СЧЁТЧИКИ КОЛОДЫ/СБРОСА — В САМОМ НАЧАЛЕ. Никакая ошибка ниже не должна их обнулять. */setPileCounts(me);try{if(lastTurnPlayer&&lastTurnPlayer!==state.turn_player_id)playSound('turn');lastTurnPlayer=state.turn_player_id;renderVisualEvent(state.visual_event);renderDestroyReel(state.destroy_reel);syncDestroyVisibility();renderEvent(state.pending_event);renderDecision(state.pending_decision);renderWaitingBanner(state);trackLog(state);$('turn-banner').textContent=active?(myTurn?'Твой ход — наводи Крутагидон':`Ходит ${active.name}`):'Подготовка';$('log-panel').innerHTML=state.logs.map(l=>`<div>${escapeHtml(l)}</div>`).join('');$('log-panel').scrollTop=$('log-panel').scrollHeight;const seatedPlayers=[...(me?[me]:[]),...state.players.filter(p=>p.id!==myId)];const seatLayouts={1:[0],2:[0,1],3:[0,2,3],4:[0,4,1,5],5:[0,4,2,3,5]};const seats=seatLayouts[seatedPlayers.length]||seatLayouts[5];$('opponents').replaceChildren(...seatedPlayers.map((p,index)=>playerEl(p,p.id===myId,p.id===state.turn_player_id,seats[index])));$('played-cards').replaceChildren(...(active?.played_this_turn||[]).map(c=>cardEl(c,null)));schedulePlayedLayout();
+  if(!$('played-modal').classList.contains('hidden'))showPlayedCards();$('main-deck-count').textContent=state.main_deck_count;$('legend-deck-count').textContent=state.legend_deck_count;$('vyal-count').textContent=state.vyal_remaining;$('zhdk-count').textContent=state.undead_stack_count;$('chips-bank-count').textContent=state.chips_bank;$('market').replaceChildren(...state.market.map(c=>cardEl(c,()=>myTurn&&buyCard(c.id))));$('legend-market').replaceChildren(...state.legend_market.map(c=>cardEl(c,()=>myTurn&&buyCard(c.id))));$('buy-wild-btn').disabled=!myTurn;const famBtn=$('buy-familiar-btn');const famLeft=(me?.familiars||[]).filter(f=>!(me?.bought_familiars||[]).includes(f.id));famBtn.disabled=!myTurn||!me||famLeft.length===0;
 /* Фамильяр куплен — карточка уходит совсем, Шальная магия занимает её место. */
 famBtn.classList.toggle('hidden',famLeft.length===0);
 if(famLeft.length){famBtn.innerHTML='<img class="buy-fam-thumb" alt="">';famBtn.title=famLeft.length>1?`Купить фамильяра (${famLeft.length} на выбор) · 6`:`Купить фамильяра: ${famLeft[0].name} · 6`;attachCardImage(famBtn.querySelector('img'),famLeft[0].id);bindPreview(famBtn,()=>famLeft[0]);if(famLeft.length>1)famBtn.innerHTML+=`<b class="fam-left">${famLeft.length}</b>`}else{famBtn.innerHTML=''};$('hand').replaceChildren(...(me?.hand||[]).map(c=>cardEl(c,()=>myTurn&&playCard(c))));$('permanents').replaceChildren(...(me?.zone_in_play||[]).map(c=>cardEl(c,c.activation?()=>activatePermanent(c):null)));$('attack-actions').replaceChildren(...(me?.available_attacks||[]).map(c=>deferredAttackButton(c,myTurn)));$('self-panel').classList.toggle('self-loshara',Boolean(me?.is_loshara));$('self-stats').innerHTML=me?`<div class="self-name">${escapeHtml(me.name)}${me.is_loshara?' · ЛОШАРА':''}${myTurn?' · ТВОЙ ХОД':''}</div><div class="self-meta"><span class="stat-chip health">♥ ${me.life}/${me.max_life} HP</span><span class="stat-chip power">⚡ ${me.power_available} мощи</span></div>`:'';if(me?.discard_top){$('self-discard-card').src=`assets/cards/${encodeURIComponent(me.discard_top.id)}.webp`}else{$('self-discard-card').src='assets/cards/card_closed.webp'}$('prize-supply').classList.toggle('hidden',state.players.some(p=>p.controls_prize));renderPause(state);$('end-turn-btn').disabled=!myTurn||Boolean(state.pause?.paused);if(state.game_over&&!announcedGameOver){announcedGameOver=true;showGameOver(state)}}catch(err){showRenderError(err)}}
@@ -958,7 +1052,7 @@ function sendPermanentActivation(card,params){playSound('card');ws.send(JSON.str
  *  через DevTools. Боты сюда не попадают вовсе — у них нет соединения.
  * ===================================================================== */
 let gmToken=localStorage.getItem('krutagidon_gm')||'';
-let gmUnlocked=false, gmRefdata=null, gmSilentAuth=false;
+let gmUnlocked=false,gmRefdata=null,gmSilentAuth=false,gmAuthPending=false,gmAuthTimer=null,gmRefdataRequest=null;
 
 function gmToast(text,bad){
   const el=document.createElement('div');
@@ -969,38 +1063,73 @@ function gmToast(text,bad){
   setTimeout(()=>el.remove(),2600);
 }
 
+function resetGmSession(){
+  gmUnlocked=false;gmToken='';gmSilentAuth=false;gmAuthPending=false;gmRefdata=null;
+  clearTimeout(gmAuthTimer);localStorage.removeItem('krutagidon_gm');
+  $('gm-auth-go').disabled=false;$('gm-modal').classList.add('hidden');
+}
 function gmSend(command,params){
   if(!gmUnlocked)return;
+  if(!ws||ws.readyState!==WebSocket.OPEN||!hasJoined){gmToast('Нет связи с сервером.',true);return;}
   ws.send(JSON.stringify({action:'gm_command',gm_token:gmToken,command,params:params||{}}));
 }
-
-function gmAuth(token){
-  gmSilentAuth=false;
-  gmToken=token;
+function gmAuth(token,silent=false){
+  if(gmAuthPending)return;
+  if(!ws||ws.readyState!==WebSocket.OPEN||!hasJoined){gmToast('Сначала подключись к игре.',true);return;}
+  gmSilentAuth=silent;gmToken=token;gmAuthPending=true;$('gm-auth-go').disabled=true;
   ws.send(JSON.stringify({action:'gm_auth',gm_token:token}));
+  clearTimeout(gmAuthTimer);
+  gmAuthTimer=setTimeout(()=>{
+    if(!gmAuthPending)return;
+    resetGmSession();gmToast('Сервер не ответил на проверку кода. Попробуй ещё раз.',true);
+  },12000);
 }
-
 async function gmLoadRefdata(){
   if(gmRefdata)return gmRefdata;
-  try{
-    const res=await fetch(`gm/refdata?token=${encodeURIComponent(gmToken)}`);
-    const data=await res.json();
-    if(data.error)return null;
-    gmRefdata=data;
-  }catch(e){return null}
-  return gmRefdata;
+  if(gmRefdataRequest)return gmRefdataRequest;
+  const token=gmToken;
+  gmRefdataRequest=(async()=>{
+    const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),10000);
+    try{
+      const res=await fetch(`gm/refdata?token=${encodeURIComponent(token)}`,{signal:controller.signal});
+      if(!res.ok)return null;
+      const data=await res.json();
+      if(data.error||!Array.isArray(data.cards)||!Array.isArray(data.tokens)||token!==gmToken)return null;
+      gmRefdata=data;return data;
+    }catch(error){return null;}
+    finally{clearTimeout(timer);gmRefdataRequest=null;}
+  })();
+  return gmRefdataRequest;
 }
-
+function gmCardLabel(card){
+  const event=/^(besp|mega)_(\d+)$/.exec(card.id);
+  if(!event)return `${card.name} · ${card.type}`;
+  const kind=event[1]==='mega'?'Мегабеспредел':'Беспредел';
+  return `${kind} №${event[2]} · ${(card.text||'Без описания').replace(/\s+/g,' ').slice(0,110)}`;
+}
 function gmFillCards(filter){
-  const sel=$('gm-card');
   if(!gmRefdata)return;
-  const q=(filter||'').trim().toLowerCase();
-  const list=gmRefdata.cards.filter(c=>!q||c.name.toLowerCase().includes(q)||c.id.includes(q)).slice(0,300);
-  sel.replaceChildren(...list.map(c=>{
-    const o=document.createElement('option');
-    o.value=c.id;o.textContent=`${c.name} · ${c.type}`;
-    return o;
+  const sel=$('gm-card'),keep=sel.value,q=(filter||'').trim().toLowerCase();
+  const list=gmRefdata.cards.filter(card=>!q||[card.name,card.id,card.type,card.text,gmCardLabel(card)].join(' ').toLowerCase().includes(q))
+    .sort((a,b)=>a.type.localeCompare(b.type,'ru')||a.id.localeCompare(b.id,'ru',{numeric:true}));
+  sel.replaceChildren(...list.map(card=>{
+    const option=document.createElement('option');option.value=card.id;
+    option.textContent=gmCardLabel(card);option.title=card.text||card.name;return option;
   }));
+  if(list.some(card=>card.id===keep))sel.value=keep;
+  renderGmCardPreview();
+}
+function renderGmCardPreview(){
+  const card=gmRefdata?.cards.find(item=>item.id===$('gm-card').value);
+  $('gm-card-preview').classList.toggle('hidden',!card);
+  if(!card)return;
+  $('gm-preview-title').textContent=gmCardLabel(card).split(' · ')[0];
+  $('gm-preview-type').textContent=`${card.type} · ${card.id}`;
+  $('gm-preview-text').textContent=card.text||'Дополнительного эффекта нет.';
+  const art=$('gm-preview-art');art.replaceChildren();
+  const image=document.createElement('img');image.alt=card.name;art.appendChild(image);
+  attachCardImage(image,card.id,()=>{image.remove();art.textContent='Нет изображения';});
+  art.onclick=()=>showCard(card);
 }
 
 function gmRefreshPlayers(){
@@ -1033,8 +1162,11 @@ function gmFillTokens(){
 
 async function gmOpen(){
   if(!gmUnlocked){$('gm-auth-modal').classList.remove('hidden');$('gm-auth-input').focus();return}
-  await gmLoadRefdata();
-  gmFillCards('');gmFillTokens();gmRefreshPlayers();
+  if(!hasJoined){gmToast('Сначала подключись к игре.',true);return;}
+  const data=await gmLoadRefdata();
+  if(!gmUnlocked)return;
+  if(!data){gmToast('Не удалось загрузить справочник ведущего. Проверь связь и код.',true);return;}
+  gmFillCards($('gm-card-search').value);gmFillTokens();gmRefreshPlayers();
   $('gm-modal').classList.remove('hidden');
 }
 
@@ -1065,9 +1197,10 @@ document.addEventListener('keydown',(e)=>{
   $('gm-close').onclick=()=>$('gm-modal').classList.add('hidden');
   $('gm-player').onchange=gmRefreshPlayers;
   $('gm-card-search').oninput=(e)=>gmFillCards(e.target.value);
+  $('gm-card').onchange=renderGmCardPreview;
 
   document.querySelectorAll('[data-gm]').forEach(btn=>{
-    btn.onclick=()=>{
+    btn.onclick=async()=>{
       const cmd=btn.dataset.gm;
       const pid=$('gm-player').value;
       const amount=Number($('gm-amount').value||0);
@@ -1081,7 +1214,7 @@ document.addEventListener('keydown',(e)=>{
         params.card_id=$('gm-card').value;
         params.destination=$('gm-card-dest').value;
       }
-      if(cmd==='finish_game'&&!confirm('Точно завершить партию и посчитать очки?'))return;
+      if(cmd==='finish_game'&&!await gameConfirm({title:'Завершить партию?',text:'Игра закончится прямо сейчас. Будут подсчитаны итоговые очки всех игроков.',confirmLabel:'Завершить партию',danger:true}))return;
       gmSend(cmd,params);
     };
   });
