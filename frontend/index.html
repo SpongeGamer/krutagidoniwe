@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="ru">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Крутагидон Online</title><link rel="stylesheet" href="style.css?v=78"></head>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Крутагидон Online</title><link rel="stylesheet" href="style.css?v=79"><link rel="stylesheet" href="desktop.css?v=79"></head>
 <body>
 <main>
   <section id="join-screen" class="screen join-screen">
@@ -24,18 +24,18 @@
       </aside>
 
       <section class="table-stage">
-        <div id="opponents" class="players-orbit"></div><section id="played-zone" class="played-zone hidden" aria-label="Сыгранные карты"><header class="played-heading"><span>Сыграно <b id="played-count">0</b></span><button id="played-expand" type="button" aria-label="Все сыгранные карты">Все карты ↗</button></header><div id="played-cards" class="played-cards"></div></section><button id="played-fallback" class="played-fallback hidden" type="button">Сыгранные карты</button>
-        <div class="stage-caption">Карты на барахолке и легенды — справа. Наведи курсор или нажми, чтобы развернуть.</div>
+        <div id="opponents" class="players-orbit"></div><section id="played-zone" class="played-zone hidden" aria-label="Сыгранные карты"><header class="played-heading"><span>Сыграно <b id="played-count">0</b></span><button id="played-expand" type="button" aria-label="Все сыгранные карты">Все карты ↗</button></header><div id="played-cards" class="played-cards"></div></section>
+        <div class="stage-caption">Карты на барахолке и легенды — справа. Нажми на рынок; его можно закрепить справа.</div>
       </section>
 
-      <aside class="market-rail">
-        <section class="market-drawer main-drawer"><button class="drawer-tab"><span>БАРАХОЛКА</span><b>›</b></button><div class="drawer-content"><div class="drawer-heading">Барахолка</div><div id="market" class="drawer-cards"></div></div></section>
-        <section class="market-drawer legend-drawer"><button class="drawer-tab"><span>ЗАЛ ЛЕГЕНД</span><b>›</b></button><div class="drawer-content"><div class="drawer-heading">Легенды</div><div id="legend-market" class="drawer-cards"></div></div></section>
-        <div class="special-actions"><button id="buy-wild-btn" class="small-action wild-action" title="Шальная магия"><img src="assets/cards/spec_wild.webp" alt="Шальная магия"></button><button id="buy-familiar-btn" class="small-action fam-action" title="Купить фамильяра · 6"></button></div>
+      <aside class="market-rail"><div class="market-tabs">
+        <section class="market-drawer main-drawer" data-market="main" data-active="true" data-open="false"><button class="drawer-tab" type="button" aria-controls="market-panel" aria-expanded="false"><span>БАРАХОЛКА</span><b>›</b></button><div class="drawer-content" id="market-panel" role="region" aria-label="Барахолка" aria-hidden="true"><header class="market-panel-header"><div class="drawer-heading">Барахолка</div><div class="market-panel-tools"><button class="market-pin" type="button" aria-pressed="false">Закрепить</button><button class="drawer-close" type="button" aria-label="Закрыть рынок">×</button></div></header><div id="market" class="drawer-cards"></div></div></section>
+        <section class="market-drawer legend-drawer" data-market="legend" data-active="false" data-open="false"><button class="drawer-tab" type="button" aria-controls="legend-market-panel" aria-expanded="false"><span>ЗАЛ ЛЕГЕНД</span><b>›</b></button><div class="drawer-content" id="legend-market-panel" role="region" aria-label="Легенды" aria-hidden="true"><header class="market-panel-header"><div class="drawer-heading">Легенды</div><div class="market-panel-tools"><button class="market-pin" type="button" aria-pressed="false">Закрепить</button><button class="drawer-close" type="button" aria-label="Закрыть рынок">×</button></div></header><div id="legend-market" class="drawer-cards"></div></div></section>
+        </div><div class="special-actions"><button id="buy-wild-btn" class="small-action wild-action" title="Шальная магия"><img src="assets/cards/spec_wild.webp" alt="Шальная магия"></button><button id="buy-familiar-btn" class="small-action fam-action" title="Купить фамильяра · 6"></button></div>
       </aside>
     </div>
 
-    <section id="self-panel" class="self-dock"><div class="self-toolbar"><div id="self-stats"></div><button id="end-turn-btn" class="button-primary end-turn">Закончить ход <span>→</span></button></div><div class="zone-label">Постоянки на столе</div><div id="permanents" class="permanent-row"></div><div id="attack-actions" class="attack-actions"></div><div class="hand-zone"><div class="self-piles"><div class="self-pile"><img src="assets/cards/card_closed.webp" alt="Колода"><b id="self-deck-count">0</b><span>Колода</span></div><div id="self-discard-pile" class="self-pile"><img id="self-discard-card" src="assets/cards/card_closed.webp" alt="Сброс"><b id="self-discard-count">0</b><span>Сброс</span></div></div><div class="hand-content"><div class="hand-label">Твоя рука</div><div id="hand" class="hand-row"></div></div></div></section>
+    <section id="self-panel" class="self-dock"><div class="self-toolbar"><div id="self-stats"></div><div class="dock-tools"><button id="played-fallback" class="played-fallback hidden" type="button">Сыгранные карты</button><button id="utility-toggle" type="button" class="utility-toggle hidden" aria-controls="self-utilities" aria-expanded="false">Постоянки</button><button id="end-turn-btn" class="button-primary end-turn">Закончить ход <span>→</span></button></div></div><section id="self-utilities" class="self-utilities hidden" aria-label="Постоянки и отложенные атаки"><button id="utilities-close" type="button" class="modal-close" aria-label="Закрыть постоянки и атаки">×</button><h3>Постоянки и отложенные атаки</h3><div id="permanent-group"><div class="zone-label">Постоянки на столе</div><div id="permanents" class="permanent-row"></div></div><div id="attack-group"><div class="zone-label">Доступные атаки</div><div id="attack-actions" class="attack-actions"></div></div></section><div class="hand-zone"><div class="self-piles"><div class="self-pile"><img src="assets/cards/card_closed.webp" alt="Колода"><b id="self-deck-count">0</b><span>Колода</span></div><div id="self-discard-pile" class="self-pile"><img id="self-discard-card" src="assets/cards/card_closed.webp" alt="Сброс"><b id="self-discard-count">0</b><span>Сброс</span></div></div><div class="hand-content"><div class="hand-label">Твоя рука<span id="hand-scroll-hint" class="hidden">Колесо мыши — прокрутка карт</span></div><div id="hand" class="hand-row"></div></div></div></section>
   </section>
 </main>
 
@@ -66,5 +66,6 @@
 <div id="ui-dialog" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="ui-dialog-title" aria-describedby="ui-dialog-text">
   <div class="modal-card ui-dialog-card"><button id="ui-dialog-close" class="modal-close" type="button" aria-label="Закрыть">×</button><div class="eyebrow">КРУТАГИДОН · РЕШЕНИЕ</div><h2 id="ui-dialog-title"></h2><p id="ui-dialog-text"></p><div class="ui-dialog-actions"><button id="ui-dialog-cancel" type="button">Отмена</button><button id="ui-dialog-confirm" type="button" class="button-primary">Подтвердить</button></div></div>
 </div>
-<script src="app.js?v=78"></script>
+<script src="desktop.js?v=79"></script>
+<script src="app.js?v=79"></script>
 </body></html>

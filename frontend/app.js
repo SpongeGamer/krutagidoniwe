@@ -145,7 +145,7 @@ function handleMessage(msg){if(msg.type==='pong'){return}
       return;
     }
     const motion=captureVisualMotion(msg.state.visual_event);lastState=msg.state;show('game-screen');render(msg.state);if(gmUnlocked&&!$('gm-modal').classList.contains('hidden'))gmRefreshPlayers();prepareVisualMotion(motion);requestAnimationFrame(()=>playVisualMotion(motion,msg.state.visual_event))}else if(msg.type==='error'){playSound('error');gameNotice(msg.message||'Не удалось выполнить действие','Действие не выполнено')}}
-function show(id){['join-screen','lobby-screen','game-screen'].forEach(s=>$(s).classList.toggle('hidden',s!==id))}
+function show(id){['join-screen','lobby-screen','game-screen'].forEach(s=>$(s).classList.toggle('hidden',s!==id));document.body.classList.toggle('in-game',id==='game-screen');window.DesktopUI?.screenChanged(id==='game-screen');}
 /* Хост убрал игрока из комнаты: не переподключаемся молча (v74) */
 function handleKicked(msg){
   wantConnection=false;                    // иначе автореконнект вернёт нас обратно
@@ -375,7 +375,7 @@ function playVisualMotion(motion,event){
   }
 }
 /* ---------- Счётчики стопок и диагностика (v43) ---------- */
-const BUILD_TAG='v78';
+const BUILD_TAG='v79';
 function setPileCounts(me){
   const d=$('self-deck-count'),c=$('self-discard-count');
   if(d)d.textContent=(me&&Number.isFinite(me.deck_count))?me.deck_count:0;
@@ -857,18 +857,22 @@ function schedulePlayedLayout(){
 function findPlayedRectangle(stage){
   const bounds=stage.getBoundingClientRect(),gap=16;
   const seats=[...stage.querySelectorAll('.player-seat')];
-  stage.classList.toggle('compact-seats',bounds.width<800&&seats.length>=3);
+  stage.classList.toggle('compact-seats',((bounds.width<800||bounds.height<520)&&seats.length>=3)||bounds.height<360);
+  stage.classList.toggle('tight-seats',(bounds.width<560&&seats.length>=3)||bounds.height<320);
   // Планшеты не могут выходить за края сукна и попадать на кнопки рынков.
   seats.forEach(seat=>{
-    seat.style.left='';
-    const pieces=[seat,...seat.querySelectorAll('.player-core,.property-plate,.seat-power,.player-prize')].map(part=>part.getBoundingClientRect());
+    seat.style.left='';seat.style.top='';seat.style.bottom='';
+    const pieces=[seat,...seat.querySelectorAll('.player-core,.avatar-box,.player-main,.familiar-card,.property-plate,.seat-power,.player-prize')].map(part=>part.getBoundingClientRect());
     const left=Math.min(...pieces.map(p=>p.left)),right=Math.max(...pieces.map(p=>p.right));
     const shift=left<bounds.left+12?bounds.left+12-left:(right>bounds.right-12?bounds.right-12-right:0);
     if(shift)seat.style.left=`${parseFloat(getComputedStyle(seat).left)+shift}px`;
+    const upper=Math.min(...pieces.map(p=>p.top)),lower=Math.max(...pieces.map(p=>p.bottom));
+    const verticalShift=upper<bounds.top+8?bounds.top+8-upper:(lower>bounds.bottom-10?bounds.bottom-10-lower:0);
+    if(verticalShift){const base=seat.offsetTop;seat.style.bottom='auto';seat.style.top=`${base+verticalShift}px`;}
   });
   const limit={left:18,top:20,right:bounds.width-18,bottom:bounds.height-34};
   const obstacles=[...stage.querySelectorAll('.player-seat')].map(seat=>{
-    const parts=[seat,...seat.querySelectorAll('.player-core,.property-plate,.seat-power,.player-prize')].map(part=>part.getBoundingClientRect());
+    const parts=[seat,...seat.querySelectorAll('.player-core,.avatar-box,.player-main,.familiar-card,.property-plate,.seat-power,.player-prize')].map(part=>part.getBoundingClientRect());
     return {left:Math.max(limit.left,Math.min(...parts.map(p=>p.left))-bounds.left-gap),
       right:Math.min(limit.right,Math.max(...parts.map(p=>p.right))-bounds.left+gap),
       top:Math.max(limit.top,Math.min(...parts.map(p=>p.top))-bounds.top-gap),
@@ -894,14 +898,14 @@ function layoutPlayedCards(){
   const count=cards.children.length;zone.classList.toggle('hidden',count===0);
   const rect=findPlayedRectangle(stage);
   if(!count){$('played-fallback').classList.add('hidden');return;}
-  if(!rect){zone.classList.add('hidden');$('played-fallback').classList.remove('hidden');$('played-fallback').textContent=`Сыграно карт: ${count} · посмотреть`;return;}
+  if(!rect){zone.classList.add('hidden');$('played-fallback').classList.remove('hidden');$('played-fallback').textContent=`Сыграно ${count} · все ↗`;return;}
   $('played-fallback').classList.add('hidden');
   const width=Math.floor(rect.right-rect.left),height=Math.floor(rect.bottom-rect.top);
   Object.assign(zone.style,{left:`${rect.left}px`,top:`${rect.top}px`,width:`${width}px`,height:`${height}px`});
   $('played-count').textContent=String(count);
   zone.classList.toggle('is-narrow',width<240);$('played-expand').textContent=width<240?'↗':'Все карты ↗';
   const availableWidth=width-20,availableHeight=height-64,gap=8;
-  if(availableHeight<114){zone.classList.add('hidden');$('played-fallback').classList.remove('hidden');$('played-fallback').textContent=`Сыграно карт: ${count} · посмотреть`;return;}
+  if(availableHeight<114){zone.classList.add('hidden');$('played-fallback').classList.remove('hidden');$('played-fallback').textContent=`Сыграно ${count} · все ↗`;return;}
   let plan=null;
   for(let cols=1;cols<=Math.min(count,Math.floor((availableWidth+gap)/86));cols++){
     const cardWidth=Math.min(118,Math.floor((availableWidth-gap*(cols-1))/cols));
@@ -934,7 +938,7 @@ function render(state){const me=state.players.find(p=>p.id===myId),active=state.
   if(!$('played-modal').classList.contains('hidden'))showPlayedCards();$('main-deck-count').textContent=state.main_deck_count;$('legend-deck-count').textContent=state.legend_deck_count;$('vyal-count').textContent=state.vyal_remaining;$('zhdk-count').textContent=state.undead_stack_count;$('chips-bank-count').textContent=state.chips_bank;$('market').replaceChildren(...state.market.map(c=>cardEl(c,()=>myTurn&&buyCard(c.id))));$('legend-market').replaceChildren(...state.legend_market.map(c=>cardEl(c,()=>myTurn&&buyCard(c.id))));$('buy-wild-btn').disabled=!myTurn;const famBtn=$('buy-familiar-btn');const famLeft=(me?.familiars||[]).filter(f=>!(me?.bought_familiars||[]).includes(f.id));famBtn.disabled=!myTurn||!me||famLeft.length===0;
 /* Фамильяр куплен — карточка уходит совсем, Шальная магия занимает её место. */
 famBtn.classList.toggle('hidden',famLeft.length===0);
-if(famLeft.length){famBtn.innerHTML='<img class="buy-fam-thumb" alt="">';famBtn.title=famLeft.length>1?`Купить фамильяра (${famLeft.length} на выбор) · 6`:`Купить фамильяра: ${famLeft[0].name} · 6`;attachCardImage(famBtn.querySelector('img'),famLeft[0].id);bindPreview(famBtn,()=>famLeft[0]);if(famLeft.length>1)famBtn.innerHTML+=`<b class="fam-left">${famLeft.length}</b>`}else{famBtn.innerHTML=''};$('hand').replaceChildren(...(me?.hand||[]).map(c=>cardEl(c,()=>myTurn&&playCard(c))));$('permanents').replaceChildren(...(me?.zone_in_play||[]).map(c=>cardEl(c,c.activation?()=>activatePermanent(c):null)));$('attack-actions').replaceChildren(...(me?.available_attacks||[]).map(c=>deferredAttackButton(c,myTurn)));$('self-panel').classList.toggle('self-loshara',Boolean(me?.is_loshara));$('self-stats').innerHTML=me?`<div class="self-name">${escapeHtml(me.name)}${me.is_loshara?' · ЛОШАРА':''}${myTurn?' · ТВОЙ ХОД':''}</div><div class="self-meta"><span class="stat-chip health">♥ ${me.life}/${me.max_life} HP</span><span class="stat-chip power">⚡ ${me.power_available} мощи</span></div>`:'';if(me?.discard_top){$('self-discard-card').src=`assets/cards/${encodeURIComponent(me.discard_top.id)}.webp`}else{$('self-discard-card').src='assets/cards/card_closed.webp'}$('prize-supply').classList.toggle('hidden',state.players.some(p=>p.controls_prize));renderPause(state);$('end-turn-btn').disabled=!myTurn||Boolean(state.pause?.paused);if(state.game_over&&!announcedGameOver){announcedGameOver=true;showGameOver(state)}}catch(err){showRenderError(err)}}
+if(famLeft.length){famBtn.innerHTML='<img class="buy-fam-thumb" alt="">';famBtn.title=famLeft.length>1?`Купить фамильяра (${famLeft.length} на выбор) · 6`:`Купить фамильяра: ${famLeft[0].name} · 6`;attachCardImage(famBtn.querySelector('img'),famLeft[0].id);bindPreview(famBtn,()=>famLeft[0]);if(famLeft.length>1)famBtn.innerHTML+=`<b class="fam-left">${famLeft.length}</b>`}else{famBtn.innerHTML=''};$('hand').replaceChildren(...(me?.hand||[]).map(c=>cardEl(c,()=>myTurn&&playCard(c))));$('permanents').replaceChildren(...(me?.zone_in_play||[]).map(c=>cardEl(c,c.activation?()=>activatePermanent(c):null)));$('attack-actions').replaceChildren(...(me?.available_attacks||[]).map(c=>deferredAttackButton(c,myTurn)));$('self-panel').classList.toggle('self-loshara',Boolean(me?.is_loshara));$('self-stats').innerHTML=me?`<div class="self-name">${escapeHtml(me.name)}${me.is_loshara?' · ЛОШАРА':''}${myTurn?' · ТВОЙ ХОД':''}</div><div class="self-meta"><span class="stat-chip health">♥ ${me.life}/${me.max_life} HP</span><span class="stat-chip power">⚡ ${me.power_available} мощи</span></div>`:'';if(me?.discard_top){$('self-discard-card').src=`assets/cards/${encodeURIComponent(me.discard_top.id)}.webp`}else{$('self-discard-card').src='assets/cards/card_closed.webp'}$('prize-supply').classList.toggle('hidden',state.players.some(p=>p.controls_prize));renderPause(state);$('end-turn-btn').disabled=!myTurn||Boolean(state.pause?.paused);if(state.game_over&&!announcedGameOver){announcedGameOver=true;showGameOver(state)}window.DesktopUI?.sync();}catch(err){showRenderError(err)}}
 function renderVisualEvent(event){const toast=$('activity-toast');if(!event||!event.seq)return;if(event.seq===lastToastSequence)return;lastToastSequence=event.seq;const card=event.cards?.[0];const verb=event.type==='buy'?'покупает':event.type==='play'?'разыгрывает':event.type==='turn'?'получает ход':'заканчивает ход';toast.innerHTML=`<b>${escapeHtml(event.player)}</b> ${verb}${card?`: <span>${escapeHtml(card.name)}</span>`:''}`;toast.classList.remove('hidden');clearTimeout(toastTimer);toastTimer=setTimeout(()=>toast.classList.add('hidden'),1500)}
 function renderEvent(event){
   const modal=$('event-modal');
@@ -1220,55 +1224,7 @@ document.addEventListener('keydown',(e)=>{
   });
 })();
 
-/* ===================================================================== *
- *  ЯЩИКИ БАРАХОЛКИ И ЛЕГЕНД (#2)
- *
- *  Было: ящик открывался по hover и по клику через toggle('open').
- *  Если открыть кликом, а потом увести мышь — состояние 'open' оставалось,
- *  а повторный клик часто не срабатывал (курсор попадал на карту внутри).
- *  Стало: клик «прикалывает» ящик (pinned) и показывает крестик + подложку.
- *  Закрыть можно тремя способами: крестик, клик мимо, Esc.
- * ===================================================================== */
-let drawerBackdrop=null;
-
-function closeDrawers(){
-  document.querySelectorAll('.market-drawer.pinned').forEach(d=>d.classList.remove('pinned','open'));
-  if(drawerBackdrop){drawerBackdrop.remove();drawerBackdrop=null}
-}
-
-function pinDrawer(drawer){
-  const already=drawer.classList.contains('pinned');
-  closeDrawers();
-  if(already)return;                    // повторный клик — просто закрыть
-  drawer.classList.add('pinned');
-  drawerBackdrop=document.createElement('div');
-  drawerBackdrop.className='drawer-backdrop';
-  drawerBackdrop.onclick=closeDrawers;
-  document.body.append(drawerBackdrop);
-}
-
-document.querySelectorAll('.market-drawer').forEach(drawer=>{
-  const tab=drawer.querySelector('.drawer-tab');
-  if(tab)tab.onclick=(e)=>{e.stopPropagation();playSound('drawer');pinDrawer(drawer)};
-  const content=drawer.querySelector('.drawer-content');
-  if(content&&!content.querySelector('.drawer-close')){
-    const close=document.createElement('button');
-    close.className='drawer-close';close.type='button';
-    close.textContent='×';close.title='Закрыть';
-    close.onclick=(e)=>{e.stopPropagation();playSound('click');closeDrawers()};
-    content.prepend(close);
-  }
-});
-
-/* Esc закрывает всё, что открыто «поверх» — по одному слою за нажатие. */
-document.addEventListener('keydown',(e)=>{
-  if(e.key!=='Escape')return;
-  if(!$('card-modal').classList.contains('hidden')){$('card-modal').classList.add('hidden');return}
-  if(document.querySelector('.market-drawer.pinned')){closeDrawers();return}
-  const feed=document.querySelector('.event-feed');
-  if(feed?.classList.contains('open'))feed.classList.remove('open');
-});
-
+/* Markets and desktop layout are managed in desktop.js. */
 /* ===================================================================== *
  *  ПЛАШКА ОЖИДАНИЯ (#11)
  *  Иконка щита мелькала слишком быстро — игроки не понимали, почему
@@ -1312,3 +1268,5 @@ function trackLog(state){
   else{logUnread=Math.max(0,total-logSeenCount)}
   renderLogBadge();
 }
+
+window.DesktopUI?.init({sound:playSound,layout:schedulePlayedLayout});
